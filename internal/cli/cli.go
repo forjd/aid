@@ -3,11 +3,14 @@ package cli
 import (
 	"fmt"
 	"io"
+
+	"aid/internal/output"
 )
 
 type Streams struct {
-	Out io.Writer
-	Err io.Writer
+	Out     io.Writer
+	Err     io.Writer
+	Options output.Options
 }
 
 type Command struct {
@@ -23,12 +26,29 @@ type Command struct {
 }
 
 func Run(args []string, stdout, stderr io.Writer) int {
-	streams := Streams{
-		Out: stdout,
-		Err: stderr,
+	options, filteredArgs, err := parseGlobalOptions(args)
+	if err != nil {
+		if options.IsJSON() {
+			_ = output.WriteError(stdout, inferCommandPath(rootCommand(), filteredArgs), err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
 	}
 
-	if err := dispatch(rootCommand(), args, streams); err != nil {
+	streams := Streams{
+		Out:     stdout,
+		Err:     stderr,
+		Options: options,
+	}
+
+	root := rootCommand()
+	if err := dispatch(root, filteredArgs, streams); err != nil {
+		if streams.Options.IsJSON() {
+			_ = output.WriteError(stdout, inferCommandPath(root, filteredArgs), err)
+			return 1
+		}
+
 		fmt.Fprintf(streams.Err, "Error: %v\n", err)
 		return 1
 	}
@@ -104,6 +124,14 @@ func renderHelp(cmd *Command, out io.Writer) {
 	fmt.Fprintln(out, "Usage:")
 	fmt.Fprintf(out, "  %s\n", cmd.Usage)
 
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Global options:")
+	fmt.Fprintln(out, "  --json              Output machine-readable JSON")
+	fmt.Fprintln(out, "  --brief             Use compact output")
+	fmt.Fprintln(out, "  --verbose           Prefer fuller human-readable output")
+	fmt.Fprintln(out, "  --repo <path>       Operate on a specific repository")
+	fmt.Fprintln(out, "  --help              Show help for a command")
+
 	if len(cmd.Children) > 0 {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Commands:")
@@ -136,6 +164,25 @@ func isHelpFlag(arg string) bool {
 	return arg == "--help" || arg == "-h"
 }
 
+func inferCommandPath(root *Command, args []string) string {
+	current := root
+
+	for i := 0; i < len(args); i++ {
+		part := args[i]
+		if part == "help" {
+			continue
+		}
+
+		child := current.child(part)
+		if child == nil {
+			break
+		}
+		current = child
+	}
+
+	return current.Path
+}
+
 func (c *Command) child(name string) *Command {
 	for _, child := range c.Children {
 		if child.Name == name {
@@ -151,7 +198,7 @@ func rootCommand() *Command {
 		Name:        "note",
 		Path:        "aid note",
 		Use:         "note",
-		Usage:       "aid note <command>",
+		Usage:       "aid note <command> [options]",
 		Summary:     "Manage notes",
 		Description: "aid note - add and inspect repo-scoped notes",
 		Examples: []string{
@@ -159,8 +206,8 @@ func rootCommand() *Command {
 			"aid note list",
 		},
 		Children: []*Command{
-			command("add", "aid note add", "add <text>", "aid note add <text>", "Add a note", noteAddCommand),
-			command("list", "aid note list", "list", "aid note list", "List recent notes", noteListCommand),
+			command("add", "aid note add", "add <text>", "aid note add <text> [options]", "Add a note", noteAddCommand),
+			command("list", "aid note list", "list", "aid note list [options]", "List recent notes", noteListCommand),
 		},
 	}
 
@@ -168,7 +215,7 @@ func rootCommand() *Command {
 		Name:        "task",
 		Path:        "aid task",
 		Use:         "task",
-		Usage:       "aid task <command>",
+		Usage:       "aid task <command> [options]",
 		Summary:     "Manage tasks",
 		Description: "aid task - add, inspect, and update tasks",
 		Examples: []string{
@@ -177,9 +224,9 @@ func rootCommand() *Command {
 			"aid task done task_12",
 		},
 		Children: []*Command{
-			command("add", "aid task add", "add <text>", "aid task add <text>", "Add a task", taskAddCommand),
-			command("list", "aid task list", "list", "aid task list", "List tasks", taskListCommand),
-			command("done", "aid task done", "done <id>", "aid task done <id>", "Mark a task as done", taskDoneCommand),
+			command("add", "aid task add", "add <text>", "aid task add <text> [options]", "Add a task", taskAddCommand),
+			command("list", "aid task list", "list", "aid task list [options]", "List tasks", taskListCommand),
+			command("done", "aid task done", "done <id>", "aid task done <id> [options]", "Mark a task as done", taskDoneCommand),
 		},
 	}
 
@@ -187,7 +234,7 @@ func rootCommand() *Command {
 		Name:        "decide",
 		Path:        "aid decide",
 		Use:         "decide",
-		Usage:       "aid decide <command>",
+		Usage:       "aid decide <command> [options]",
 		Summary:     "Manage engineering decisions",
 		Description: "aid decide - record and inspect engineering decisions",
 		Examples: []string{
@@ -195,8 +242,8 @@ func rootCommand() *Command {
 			"aid decide list",
 		},
 		Children: []*Command{
-			command("add", "aid decide add", "add <text>", "aid decide add <text>", "Record an engineering decision", decisionAddCommand),
-			command("list", "aid decide list", "list", "aid decide list", "List decisions", decisionListCommand),
+			command("add", "aid decide add", "add <text>", "aid decide add <text> [options]", "Record an engineering decision", decisionAddCommand),
+			command("list", "aid decide list", "list", "aid decide list [options]", "List decisions", decisionListCommand),
 		},
 	}
 
@@ -204,7 +251,7 @@ func rootCommand() *Command {
 		Name:        "handoff",
 		Path:        "aid handoff",
 		Use:         "handoff",
-		Usage:       "aid handoff <command>",
+		Usage:       "aid handoff <command> [options]",
 		Summary:     "Manage handoffs",
 		Description: "aid handoff - generate and inspect saved handoffs",
 		Examples: []string{
@@ -212,8 +259,8 @@ func rootCommand() *Command {
 			"aid handoff list",
 		},
 		Children: []*Command{
-			stubCommand("generate", "aid handoff generate", "generate", "aid handoff generate", "Create a structured handoff summary"),
-			stubCommand("list", "aid handoff list", "list", "aid handoff list", "List saved handoffs"),
+			stubCommand("generate", "aid handoff generate", "generate", "aid handoff generate [options]", "Create a structured handoff summary"),
+			stubCommand("list", "aid handoff list", "list", "aid handoff list [options]", "List saved handoffs"),
 		},
 	}
 
@@ -221,7 +268,7 @@ func rootCommand() *Command {
 		Name:        "history",
 		Path:        "aid history",
 		Use:         "history",
-		Usage:       "aid history <command>",
+		Usage:       "aid history <command> [options]",
 		Summary:     "Search indexed git history",
 		Description: "aid history - index and search commit history",
 		Examples: []string{
@@ -229,8 +276,8 @@ func rootCommand() *Command {
 			`aid history search "invoice VAT reconciliation"`,
 		},
 		Children: []*Command{
-			stubCommand("index", "aid history index", "index", "aid history index", "Index git history for search"),
-			stubCommand("search", "aid history search", "search <query>", "aid history search <query>", "Search indexed commit history"),
+			stubCommand("index", "aid history index", "index", "aid history index [options]", "Index git history for search"),
+			stubCommand("search", "aid history search", "search <query>", "aid history search <query> [options]", "Search indexed commit history"),
 		},
 	}
 
@@ -248,10 +295,10 @@ func rootCommand() *Command {
 			`aid history search "invoice VAT reconciliation"`,
 		},
 		Children: []*Command{
-			command("init", "aid init", "init", "aid init", "Initialise aid in the current repository", initCommand),
-			stubCommand("status", "aid status", "status", "aid status", "Show repo memory status"),
-			stubCommand("resume", "aid resume", "resume", "aid resume", "Show a compact working summary"),
-			stubCommand("recall", "aid recall", "recall <query>", "aid recall <query>", "Search notes, decisions, handoffs, and commits"),
+			command("init", "aid init", "init", "aid init [options]", "Initialise aid in the current repository", initCommand),
+			command("status", "aid status", "status", "aid status [options]", "Show repo memory status", statusCommand),
+			stubCommand("resume", "aid resume", "resume", "aid resume [options]", "Show a compact working summary"),
+			stubCommand("recall", "aid recall", "recall <query>", "aid recall <query> [options]", "Search notes, decisions, handoffs, and commits"),
 			note,
 			task,
 			decide,
@@ -259,6 +306,44 @@ func rootCommand() *Command {
 			history,
 		},
 	}
+}
+
+func parseGlobalOptions(args []string) (output.Options, []string, error) {
+	opts := output.Options{Format: output.FormatHuman}
+	filtered := make([]string, 0, len(args))
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--json":
+			if opts.IsBrief() || opts.IsVerbose() {
+				return opts, filtered, fmt.Errorf("cannot combine --json with --brief or --verbose")
+			}
+			opts.Format = output.FormatJSON
+		case arg == "--brief":
+			if opts.IsJSON() || opts.IsVerbose() {
+				return opts, filtered, fmt.Errorf("cannot combine --brief with --json or --verbose")
+			}
+			opts.Format = output.FormatBrief
+		case arg == "--verbose":
+			if opts.IsJSON() || opts.IsBrief() {
+				return opts, filtered, fmt.Errorf("cannot combine --verbose with --json or --brief")
+			}
+			opts.Format = output.FormatVerbose
+		case arg == "--repo":
+			if i+1 >= len(args) {
+				return opts, filtered, fmt.Errorf("missing value for --repo")
+			}
+			opts.RepoPath = args[i+1]
+			i++
+		case len(arg) > len("--repo=") && arg[:7] == "--repo=":
+			opts.RepoPath = arg[7:]
+		default:
+			filtered = append(filtered, arg)
+		}
+	}
+
+	return opts, filtered, nil
 }
 
 func stubCommand(name, path, use, usage, summary string) *Command {

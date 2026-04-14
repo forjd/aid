@@ -61,6 +61,20 @@ type Decision struct {
 	CreatedAt time.Time
 }
 
+type TaskCounts struct {
+	Total      int `json:"total"`
+	Open       int `json:"open"`
+	InProgress int `json:"in_progress"`
+	Done       int `json:"done"`
+	Blocked    int `json:"blocked"`
+}
+
+type StatusCounts struct {
+	Notes     int        `json:"notes"`
+	Decisions int        `json:"decisions"`
+	Tasks     TaskCounts `json:"tasks"`
+}
+
 type AddNoteInput struct {
 	RepoID int64
 	Branch string
@@ -95,6 +109,7 @@ type Store interface {
 	CompleteTask(ctx context.Context, repoID int64, taskID int64) (Task, error)
 	AddDecision(ctx context.Context, input AddDecisionInput) (Decision, error)
 	ListDecisions(ctx context.Context, repoID int64, limit int) ([]Decision, error)
+	StatusCounts(ctx context.Context, repoID int64) (StatusCounts, error)
 }
 
 func NoteRef(id int64) string {

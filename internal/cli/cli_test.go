@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -141,6 +142,114 @@ func TestInitAndCrudFlow(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "aid.db")); err != nil {
 		t.Fatalf("expected sqlite database to exist: %v", err)
+	}
+}
+
+func TestStatusSupportsBriefAndJSON(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to temp repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	beforeInit := runCLI(t, "status", "--brief")
+	if !strings.Contains(beforeInit, "Aid: not initialised") {
+		t.Fatalf("expected uninitialised brief status, got %q", beforeInit)
+	}
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "note", "add", "Token refresh bug")
+	_ = runCLI(t, "task", "add", "Fix token refresh")
+	_ = runCLI(t, "decide", "add", "Store money as integer pence")
+
+	briefStatus := runCLI(t, "status", "--brief")
+	if !strings.Contains(briefStatus, "Aid: initialised") {
+		t.Fatalf("expected initialised brief status, got %q", briefStatus)
+	}
+	if !strings.Contains(briefStatus, "Notes: 1") {
+		t.Fatalf("expected brief note count, got %q", briefStatus)
+	}
+
+	jsonStatus := runCLI(t, "status", "--json")
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		OK            bool   `json:"ok"`
+		Command       string `json:"command"`
+		Data          struct {
+			Initialized bool `json:"initialized"`
+			Counts      *struct {
+				Notes     int `json:"notes"`
+				Decisions int `json:"decisions"`
+				Tasks     struct {
+					Open int `json:"open"`
+				} `json:"tasks"`
+			} `json:"counts"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonStatus), &payload); err != nil {
+		t.Fatalf("unmarshal status json: %v\n%s", err, jsonStatus)
+	}
+	if !payload.OK || payload.Command != "status" || !payload.Data.Initialized {
+		t.Fatalf("unexpected status json payload: %#v", payload)
+	}
+	if payload.Data.Counts == nil || payload.Data.Counts.Notes != 1 || payload.Data.Counts.Decisions != 1 || payload.Data.Counts.Tasks.Open != 1 {
+		t.Fatalf("unexpected status counts: %#v", payload.Data.Counts)
+	}
+}
+
+func TestGlobalRepoFlagAndJSONListOutput(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+	workDir := t.TempDir()
+
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir to work dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "--repo", repoDir, "init")
+	_ = runCLI(t, "note", "add", "Cross-directory note", "--repo", repoDir)
+
+	jsonNotes := runCLI(t, "--repo", repoDir, "note", "list", "--json")
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			Notes []struct {
+				ID   string `json:"id"`
+				Text string `json:"text"`
+			} `json:"notes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonNotes), &payload); err != nil {
+		t.Fatalf("unmarshal notes json: %v\n%s", err, jsonNotes)
+	}
+	if !payload.OK || payload.Command != "note list" {
+		t.Fatalf("unexpected notes payload: %#v", payload)
+	}
+	if len(payload.Data.Notes) != 1 || payload.Data.Notes[0].Text != "Cross-directory note" {
+		t.Fatalf("unexpected notes data: %#v", payload.Data.Notes)
 	}
 }
 

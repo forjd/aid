@@ -379,6 +379,63 @@ func (s *Store) ListDecisions(ctx context.Context, repoID int64, limit int) ([]s
 	return decisions, nil
 }
 
+func (s *Store) StatusCounts(ctx context.Context, repoID int64) (store.StatusCounts, error) {
+	var counts store.StatusCounts
+
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM notes
+		WHERE repo_id = ?
+	`, repoID).Scan(&counts.Notes); err != nil {
+		return store.StatusCounts{}, fmt.Errorf("count notes: %w", err)
+	}
+
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM decisions
+		WHERE repo_id = ?
+	`, repoID).Scan(&counts.Decisions); err != nil {
+		return store.StatusCounts{}, fmt.Errorf("count decisions: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT status, COUNT(*)
+		FROM tasks
+		WHERE repo_id = ?
+		GROUP BY status
+	`, repoID)
+	if err != nil {
+		return store.StatusCounts{}, fmt.Errorf("count tasks: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return store.StatusCounts{}, fmt.Errorf("scan task counts: %w", err)
+		}
+
+		counts.Tasks.Total += count
+		switch store.TaskStatus(status) {
+		case store.TaskOpen:
+			counts.Tasks.Open = count
+		case store.TaskInProgress:
+			counts.Tasks.InProgress = count
+		case store.TaskDone:
+			counts.Tasks.Done = count
+		case store.TaskBlocked:
+			counts.Tasks.Blocked = count
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return store.StatusCounts{}, fmt.Errorf("iterate task counts: %w", err)
+	}
+
+	return counts, nil
+}
+
 func (s *Store) noteByID(ctx context.Context, id int64) (store.Note, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, repo_id, branch, scope, text, created_at

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"aid/internal/app"
@@ -26,7 +27,7 @@ func initCommand(args []string, streams Streams) error {
 	}
 
 	ctx := context.Background()
-	env, sqliteStore, err := openStore(ctx)
+	env, sqliteStore, err := openStore(ctx, streams)
 	if err != nil {
 		return err
 	}
@@ -42,15 +43,14 @@ func initCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderInit(streams.Out, output.InitResult{
+	return output.RenderInit(streams.Out, streams.Options, output.InitResult{
 		RepoName:      repo.Name,
 		RepoPath:      repo.Path,
+		Branch:        env.Branch,
 		DBPath:        env.DBPath,
 		ConfigPath:    env.RepoConfigPath,
 		ConfigCreated: configCreated,
 	})
-
-	return nil
 }
 
 func noteAddCommand(args []string, streams Streams) error {
@@ -59,7 +59,7 @@ func noteAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	runtime, err := openInitializedRepo(context.Background())
+	runtime, err := openInitializedRepo(context.Background(), streams)
 	if err != nil {
 		return err
 	}
@@ -75,8 +75,7 @@ func noteAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderNoteAdded(streams.Out, note)
-	return nil
+	return output.RenderNoteAdded(streams.Out, streams.Options, note)
 }
 
 func noteListCommand(args []string, streams Streams) error {
@@ -84,7 +83,7 @@ func noteListCommand(args []string, streams Streams) error {
 		return fmt.Errorf("note list does not accept arguments")
 	}
 
-	runtime, err := openInitializedRepo(context.Background())
+	runtime, err := openInitializedRepo(context.Background(), streams)
 	if err != nil {
 		return err
 	}
@@ -95,8 +94,7 @@ func noteListCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderNotes(streams.Out, notes)
-	return nil
+	return output.RenderNotes(streams.Out, streams.Options, notes)
 }
 
 func taskAddCommand(args []string, streams Streams) error {
@@ -105,7 +103,7 @@ func taskAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	runtime, err := openInitializedRepo(context.Background())
+	runtime, err := openInitializedRepo(context.Background(), streams)
 	if err != nil {
 		return err
 	}
@@ -122,8 +120,7 @@ func taskAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderTaskAdded(streams.Out, task)
-	return nil
+	return output.RenderTaskAdded(streams.Out, streams.Options, task)
 }
 
 func taskListCommand(args []string, streams Streams) error {
@@ -131,7 +128,7 @@ func taskListCommand(args []string, streams Streams) error {
 		return fmt.Errorf("task list does not accept arguments")
 	}
 
-	runtime, err := openInitializedRepo(context.Background())
+	runtime, err := openInitializedRepo(context.Background(), streams)
 	if err != nil {
 		return err
 	}
@@ -142,8 +139,7 @@ func taskListCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderTasks(streams.Out, tasks)
-	return nil
+	return output.RenderTasks(streams.Out, streams.Options, tasks)
 }
 
 func taskDoneCommand(args []string, streams Streams) error {
@@ -156,7 +152,7 @@ func taskDoneCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	runtime, err := openInitializedRepo(context.Background())
+	runtime, err := openInitializedRepo(context.Background(), streams)
 	if err != nil {
 		return err
 	}
@@ -167,8 +163,7 @@ func taskDoneCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderTaskCompleted(streams.Out, task)
-	return nil
+	return output.RenderTaskCompleted(streams.Out, streams.Options, task)
 }
 
 func decisionAddCommand(args []string, streams Streams) error {
@@ -177,7 +172,7 @@ func decisionAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	runtime, err := openInitializedRepo(context.Background())
+	runtime, err := openInitializedRepo(context.Background(), streams)
 	if err != nil {
 		return err
 	}
@@ -192,8 +187,7 @@ func decisionAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderDecisionAdded(streams.Out, decision)
-	return nil
+	return output.RenderDecisionAdded(streams.Out, streams.Options, decision)
 }
 
 func decisionListCommand(args []string, streams Streams) error {
@@ -201,7 +195,7 @@ func decisionListCommand(args []string, streams Streams) error {
 		return fmt.Errorf("decide list does not accept arguments")
 	}
 
-	runtime, err := openInitializedRepo(context.Background())
+	runtime, err := openInitializedRepo(context.Background(), streams)
 	if err != nil {
 		return err
 	}
@@ -212,12 +206,58 @@ func decisionListCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	output.RenderDecisions(streams.Out, decisions)
-	return nil
+	return output.RenderDecisions(streams.Out, streams.Options, decisions)
 }
 
-func openStore(ctx context.Context) (app.Environment, *sqlitestore.Store, error) {
-	env, err := app.Discover("")
+func statusCommand(args []string, streams Streams) error {
+	if len(args) > 0 {
+		return fmt.Errorf("status does not accept arguments")
+	}
+
+	ctx := context.Background()
+	env, sqliteStore, err := openStore(ctx, streams)
+	if err != nil {
+		return err
+	}
+	defer sqliteStore.Close()
+
+	repo, err := sqliteStore.FindRepoByPath(ctx, env.RepoRoot)
+	if err != nil {
+		return err
+	}
+
+	configExists := true
+	if _, err := os.Stat(env.RepoConfigPath); err != nil {
+		if os.IsNotExist(err) {
+			configExists = false
+		} else {
+			return fmt.Errorf("stat repo config: %w", err)
+		}
+	}
+
+	result := output.StatusResult{
+		RepoName:     env.RepoName,
+		RepoPath:     env.RepoRoot,
+		Branch:       env.Branch,
+		DBPath:       env.DBPath,
+		ConfigPath:   env.RepoConfigPath,
+		ConfigExists: configExists,
+		Initialized:  repo != nil,
+	}
+
+	if repo != nil {
+		counts, err := sqliteStore.StatusCounts(ctx, repo.ID)
+		if err != nil {
+			return err
+		}
+		result.Counts = counts
+	}
+
+	return output.RenderStatus(streams.Out, streams.Options, result)
+}
+
+func openStore(ctx context.Context, streams Streams) (app.Environment, *sqlitestore.Store, error) {
+	env, err := app.Discover(streams.Options.RepoPath)
 	if err != nil {
 		return app.Environment{}, nil, err
 	}
@@ -235,8 +275,8 @@ func openStore(ctx context.Context) (app.Environment, *sqlitestore.Store, error)
 	return env, sqliteStore, nil
 }
 
-func openInitializedRepo(ctx context.Context) (*repoRuntime, error) {
-	env, sqliteStore, err := openStore(ctx)
+func openInitializedRepo(ctx context.Context, streams Streams) (*repoRuntime, error) {
+	env, sqliteStore, err := openStore(ctx, streams)
 	if err != nil {
 		return nil, err
 	}

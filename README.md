@@ -10,7 +10,9 @@ This repository now has a Go-first scaffold:
 
 - a compilable CLI entrypoint
 - a command tree and help surface
+- global `--brief`, `--json`, and `--repo` flag handling
 - SQLite-backed `init`, `note`, `task`, and `decide` commands
+- a real `status` command
 - package boundaries for storage, Git, search, resume, handoff, and output
 - a static skill package location for agents
 
@@ -51,7 +53,9 @@ skills/aid/          static skill package for compatible agents
 make build
 go run ./cmd/aid --help
 go run ./cmd/aid init
+go run ./cmd/aid status --brief
 go run ./cmd/aid note add "Refresh token bug occurs after 401 retry"
+go run ./cmd/aid note list --json
 go test ./...
 ```
 

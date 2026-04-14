@@ -102,4 +102,15 @@ func TestStoreCRUDFlow(t *testing.T) {
 	if len(decisions) != 1 || decisions[0].Text != decision.Text {
 		t.Fatalf("unexpected decisions: %#v", decisions)
 	}
+
+	counts, err := sqliteStore.StatusCounts(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("status counts: %v", err)
+	}
+	if counts.Notes != 1 || counts.Decisions != 1 {
+		t.Fatalf("unexpected note/decision counts: %#v", counts)
+	}
+	if counts.Tasks.Total != 1 || counts.Tasks.Done != 1 {
+		t.Fatalf("unexpected task counts: %#v", counts.Tasks)
+	}
 }

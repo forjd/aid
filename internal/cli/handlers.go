@@ -149,8 +149,24 @@ func taskListCommand(args []string, streams Streams) error {
 }
 
 func taskDoneCommand(args []string, streams Streams) error {
+	return taskStatusCommand(args, streams, store.TaskDone)
+}
+
+func taskStartCommand(args []string, streams Streams) error {
+	return taskStatusCommand(args, streams, store.TaskInProgress)
+}
+
+func taskBlockCommand(args []string, streams Streams) error {
+	return taskStatusCommand(args, streams, store.TaskBlocked)
+}
+
+func taskReopenCommand(args []string, streams Streams) error {
+	return taskStatusCommand(args, streams, store.TaskOpen)
+}
+
+func taskStatusCommand(args []string, streams Streams, status store.TaskStatus) error {
 	if len(args) != 1 {
-		return fmt.Errorf("task done expects exactly one task id")
+		return fmt.Errorf("task %s expects exactly one task id", taskCommandName(status))
 	}
 
 	taskID, err := store.ParseTaskRef(args[0])
@@ -164,12 +180,12 @@ func taskDoneCommand(args []string, streams Streams) error {
 	}
 	defer runtime.close()
 
-	task, err := runtime.store.CompleteTask(context.Background(), runtime.repo.ID, taskID)
+	task, err := runtime.store.UpdateTaskStatus(context.Background(), runtime.repo.ID, taskID, status)
 	if err != nil {
 		return err
 	}
 
-	return output.RenderTaskCompleted(streams.Out, streams.Options, task)
+	return output.RenderTaskStatusUpdated(streams.Out, streams.Options, taskCommandName(status), taskStatusVerb(status), task)
 }
 
 func decisionAddCommand(args []string, streams Streams) error {
@@ -289,23 +305,17 @@ func resumeCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	commits, err := git.RecentCommits(runtime.env.RepoRoot, 5)
+	commits, err := recentContextCommits(ctx, runtime, 5)
 	if err != nil {
 		return err
 	}
 
-	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 1)
+	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 3)
 	if err != nil {
 		return err
 	}
 
-	var latestHandoff *store.Handoff
-	if len(handoffs) > 0 {
-		latest := handoffs[0]
-		latestHandoff = &latest
-	}
-
-	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits, latestHandoff)
+	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits, handoffs)
 	return output.RenderResume(streams.Out, streams.Options, output.ResumeResult{
 		RepoName: runtime.env.RepoName,
 		RepoPath: runtime.env.RepoRoot,
@@ -341,7 +351,12 @@ func handoffGenerateCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	commits, err := git.RecentCommits(runtime.env.RepoRoot, 5)
+	commits, err := recentContextCommits(ctx, runtime, 5)
+	if err != nil {
+		return err
+	}
+
+	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 3)
 	if err != nil {
 		return err
 	}
@@ -351,7 +366,7 @@ func handoffGenerateCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits, nil)
+	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits, handoffs)
 	snapshot := handoffpkg.Build(runtime.env.Branch, worktree, bundle, tasks)
 
 	handoff, err := runtime.store.AddHandoff(ctx, store.AddHandoffInput{
@@ -399,21 +414,57 @@ func historyIndexCommand(args []string, streams Streams) error {
 	}
 	defer runtime.close()
 
-	commits, err := git.Commits(runtime.env.RepoRoot, 0)
+	reachableSHAs, err := git.AllCommitSHAs(runtime.env.RepoRoot)
 	if err != nil {
 		return err
 	}
 
-	storeCommits := make([]store.Commit, 0, len(commits))
-	for _, commit := range filterIndexedCommits(commits, runtime.cfg.Indexing.IgnorePaths) {
-		storeCommits = append(storeCommits, store.Commit{
-			SHA:          commit.SHA,
-			Author:       commit.Author,
-			CommittedAt:  commit.CommittedAt,
-			Message:      commit.Message,
-			Summary:      commit.Summary,
-			ChangedPaths: append([]string(nil), commit.ChangedPaths...),
-		})
+	existingCommits, err := runtime.store.ListCommits(ctx, runtime.repo.ID, 0)
+	if err != nil {
+		return err
+	}
+
+	existingBySHA := make(map[string]store.Commit, len(existingCommits))
+	for _, commit := range existingCommits {
+		existingBySHA[commit.SHA] = commit
+	}
+
+	newSHAs := make([]string, 0, len(reachableSHAs))
+	for _, sha := range reachableSHAs {
+		if _, ok := existingBySHA[sha]; ok {
+			continue
+		}
+		newSHAs = append(newSHAs, sha)
+	}
+
+	newCommits, err := git.CommitsBySHA(runtime.env.RepoRoot, newSHAs)
+	if err != nil {
+		return err
+	}
+
+	newBySHA := make(map[string]git.Commit, len(newCommits))
+	for _, commit := range newCommits {
+		newBySHA[commit.SHA] = commit
+	}
+
+	storeCommits := make([]store.Commit, 0, len(reachableSHAs))
+	for _, sha := range reachableSHAs {
+		if existing, ok := existingBySHA[sha]; ok {
+			filtered, keep := filteredStoredCommit(existing, runtime.cfg.Indexing.IgnorePaths)
+			if keep {
+				storeCommits = append(storeCommits, filtered)
+			}
+			continue
+		}
+
+		commit, ok := newBySHA[sha]
+		if !ok {
+			continue
+		}
+		filtered, keep := filteredGitCommit(commit, runtime.cfg.Indexing.IgnorePaths)
+		if keep {
+			storeCommits = append(storeCommits, filtered)
+		}
 	}
 
 	result, err := runtime.store.SyncCommits(ctx, store.SyncCommitsInput{
@@ -577,6 +628,35 @@ func filterIndexedCommits(commits []git.Commit, ignorePaths []string) []git.Comm
 	return filtered
 }
 
+func recentContextCommits(ctx context.Context, runtime *repoRuntime, limit int) ([]store.Commit, error) {
+	commits, err := runtime.store.ListCommits(ctx, runtime.repo.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(commits) > 0 {
+		return commits, nil
+	}
+
+	liveCommits, err := git.RecentCommits(runtime.env.RepoRoot, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	commits = make([]store.Commit, 0, len(liveCommits))
+	for _, commit := range liveCommits {
+		commits = append(commits, store.Commit{
+			SHA:          commit.SHA,
+			Author:       commit.Author,
+			CommittedAt:  commit.CommittedAt,
+			Message:      commit.Message,
+			Summary:      commit.Summary,
+			ChangedPaths: append([]string(nil), commit.ChangedPaths...),
+		})
+	}
+
+	return commits, nil
+}
+
 func filterChangedPaths(paths []string, ignorePaths []string) []string {
 	filtered := make([]string, 0, len(paths))
 	for _, path := range paths {
@@ -586,6 +666,32 @@ func filterChangedPaths(paths []string, ignorePaths []string) []string {
 		filtered = append(filtered, path)
 	}
 	return filtered
+}
+
+func filteredGitCommit(commit git.Commit, ignorePaths []string) (store.Commit, bool) {
+	paths := filterChangedPaths(commit.ChangedPaths, ignorePaths)
+	if len(commit.ChangedPaths) > 0 && len(paths) == 0 {
+		return store.Commit{}, false
+	}
+
+	return store.Commit{
+		SHA:          commit.SHA,
+		Author:       commit.Author,
+		CommittedAt:  commit.CommittedAt,
+		Message:      commit.Message,
+		Summary:      commit.Summary,
+		ChangedPaths: paths,
+	}, true
+}
+
+func filteredStoredCommit(commit store.Commit, ignorePaths []string) (store.Commit, bool) {
+	paths := filterChangedPaths(commit.ChangedPaths, ignorePaths)
+	if len(commit.ChangedPaths) > 0 && len(paths) == 0 {
+		return store.Commit{}, false
+	}
+
+	commit.ChangedPaths = paths
+	return commit, true
 }
 
 func matchesIgnoredPath(path string, ignorePaths []string) bool {
@@ -604,4 +710,30 @@ func historyIndexMode(initial bool) string {
 		return "initial sync"
 	}
 	return "incremental sync"
+}
+
+func taskCommandName(status store.TaskStatus) string {
+	switch status {
+	case store.TaskInProgress:
+		return "start"
+	case store.TaskBlocked:
+		return "block"
+	case store.TaskOpen:
+		return "reopen"
+	default:
+		return "done"
+	}
+}
+
+func taskStatusVerb(status store.TaskStatus) string {
+	switch status {
+	case store.TaskInProgress:
+		return "Started"
+	case store.TaskBlocked:
+		return "Blocked"
+	case store.TaskOpen:
+		return "Reopened"
+	default:
+		return "Completed"
+	}
 }

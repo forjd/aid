@@ -234,11 +234,17 @@ func rootCommand() *Command {
 		Examples: []string{
 			`aid task add "Fix VAT rounding on invoice lines"`,
 			"aid task list",
+			"aid task start task_12",
+			"aid task block task_12",
+			"aid task reopen task_12",
 			"aid task done task_12",
 		},
 		Children: []*Command{
 			command("add", "aid task add", "add <text>", "aid task add <text> [options]", "Add a task", taskAddCommand),
 			command("list", "aid task list", "list", "aid task list [options]", "List tasks", taskListCommand),
+			command("start", "aid task start", "start <id>", "aid task start <id> [options]", "Mark a task as in progress", taskStartCommand),
+			command("block", "aid task block", "block <id>", "aid task block <id> [options]", "Mark a task as blocked", taskBlockCommand),
+			command("reopen", "aid task reopen", "reopen <id>", "aid task reopen <id> [options]", "Reopen a task", taskReopenCommand),
 			command("done", "aid task done", "done <id>", "aid task done <id> [options]", "Mark a task as done", taskDoneCommand),
 		},
 	}

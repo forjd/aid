@@ -79,6 +79,22 @@ func TestStoreCRUDFlow(t *testing.T) {
 		t.Fatalf("unexpected tasks: %#v", tasks)
 	}
 
+	inProgressTask, err := sqliteStore.UpdateTaskStatus(ctx, repo.ID, task.ID, store.TaskInProgress)
+	if err != nil {
+		t.Fatalf("mark task in progress: %v", err)
+	}
+	if inProgressTask.Status != store.TaskInProgress {
+		t.Fatalf("expected task status %q, got %q", store.TaskInProgress, inProgressTask.Status)
+	}
+
+	blockedTask, err := sqliteStore.UpdateTaskStatus(ctx, repo.ID, task.ID, store.TaskBlocked)
+	if err != nil {
+		t.Fatalf("mark task blocked: %v", err)
+	}
+	if blockedTask.Status != store.TaskBlocked {
+		t.Fatalf("expected task status %q, got %q", store.TaskBlocked, blockedTask.Status)
+	}
+
 	completedTask, err := sqliteStore.CompleteTask(ctx, repo.ID, task.ID)
 	if err != nil {
 		t.Fatalf("complete task: %v", err)
@@ -156,6 +172,14 @@ func TestStoreCRUDFlow(t *testing.T) {
 	}
 	if len(commits) != 1 || commits[0].SHA != "abc123" {
 		t.Fatalf("unexpected commits: %#v", commits)
+	}
+
+	listedCommits, err := sqliteStore.ListCommits(ctx, repo.ID, 10)
+	if err != nil {
+		t.Fatalf("list commits: %v", err)
+	}
+	if len(listedCommits) != 1 || listedCommits[0].SHA != "abc123" {
+		t.Fatalf("unexpected listed commits: %#v", listedCommits)
 	}
 }
 

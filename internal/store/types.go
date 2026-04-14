@@ -152,6 +152,7 @@ type Store interface {
 	ListNotes(ctx context.Context, repoID int64, limit int) ([]Note, error)
 	AddTask(ctx context.Context, input AddTaskInput) (Task, error)
 	ListTasks(ctx context.Context, repoID int64, limit int) ([]Task, error)
+	UpdateTaskStatus(ctx context.Context, repoID int64, taskID int64, status TaskStatus) (Task, error)
 	CompleteTask(ctx context.Context, repoID int64, taskID int64) (Task, error)
 	AddDecision(ctx context.Context, input AddDecisionInput) (Decision, error)
 	ListDecisions(ctx context.Context, repoID int64, limit int) ([]Decision, error)
@@ -159,6 +160,7 @@ type Store interface {
 	ListHandoffs(ctx context.Context, repoID int64, limit int) ([]Handoff, error)
 	ReplaceCommits(ctx context.Context, input ReplaceCommitsInput) error
 	SyncCommits(ctx context.Context, input SyncCommitsInput) (SyncCommitsResult, error)
+	ListCommits(ctx context.Context, repoID int64, limit int) ([]Commit, error)
 	SearchCommits(ctx context.Context, repoID int64, query string, limit int) ([]Commit, error)
 	SearchNotes(ctx context.Context, repoID int64, branch string, query string, limit int) ([]Note, error)
 	SearchDecisions(ctx context.Context, repoID int64, branch string, query string, limit int) ([]Decision, error)

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/forjd/aid/internal/git"
 	resumepkg "github.com/forjd/aid/internal/resume"
 	searchpkg "github.com/forjd/aid/internal/search"
 	"github.com/forjd/aid/internal/store"
@@ -305,7 +304,7 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 
 		commits := make([]commitPayload, 0, len(result.Bundle.RecentCommits))
 		for _, commit := range result.Bundle.RecentCommits {
-			commits = append(commits, commitModel(commit))
+			commits = append(commits, storeCommitModel(commit))
 		}
 
 		return writeJSON(w, envelope{
@@ -392,7 +391,7 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 				if i > 0 {
 					fmt.Fprintln(w)
 				}
-				writeVerboseCommit(w, commitModel(commit))
+				writeVerboseCommit(w, storeCommitModel(commit))
 			}
 		}
 
@@ -941,11 +940,15 @@ func RenderTasks(w io.Writer, opts Options, tasks []store.Task) error {
 }
 
 func RenderTaskCompleted(w io.Writer, opts Options, task store.Task) error {
+	return RenderTaskStatusUpdated(w, opts, "done", "Completed", task)
+}
+
+func RenderTaskStatusUpdated(w io.Writer, opts Options, command string, verb string, task store.Task) error {
 	if opts.IsJSON() {
 		return writeJSON(w, envelope{
 			SchemaVersion: "1",
 			OK:            true,
-			Command:       "task done",
+			Command:       "task " + command,
 			Data: struct {
 				Task taskPayload `json:"task"`
 			}{
@@ -965,7 +968,7 @@ func RenderTaskCompleted(w io.Writer, opts Options, task store.Task) error {
 		return nil
 	}
 
-	fmt.Fprintf(w, "Completed task %s%s: %s\n", store.TaskRef(task.ID), branchSuffix(task.Branch), task.Text)
+	fmt.Fprintf(w, "%s task %s%s: %s\n", verb, store.TaskRef(task.ID), branchSuffix(task.Branch), task.Text)
 	return nil
 }
 
@@ -1154,17 +1157,6 @@ func decisionModel(decision store.Decision) decisionPayload {
 		Rationale: decision.Rationale,
 		Branch:    nullableString(decision.Branch),
 		CreatedAt: decision.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-	}
-}
-
-func commitModel(commit git.Commit) commitPayload {
-	return commitPayload{
-		SHA:          commit.SHA,
-		Summary:      commit.Summary,
-		Message:      commit.Message,
-		Author:       commit.Author,
-		CommittedAt:  commit.CommittedAt.Format("2006-01-02T15:04:05Z07:00"),
-		ChangedPaths: append([]string(nil), commit.ChangedPaths...),
 	}
 }
 

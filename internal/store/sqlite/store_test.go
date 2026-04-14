@@ -158,3 +158,88 @@ func TestStoreCRUDFlow(t *testing.T) {
 		t.Fatalf("unexpected commits: %#v", commits)
 	}
 }
+
+func TestCommitSearchUsesFTSRankingAndRepairsMissingIndex(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "aid.db")
+
+	sqliteStore, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	if err := sqliteStore.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	repo, err := sqliteStore.UpsertRepo(ctx, "/tmp/project", "project")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	indexedAt := time.Now().UTC().Round(time.Second)
+	if err := sqliteStore.ReplaceCommits(ctx, store.ReplaceCommitsInput{
+		RepoID:    repo.ID,
+		IndexedAt: indexedAt,
+		Commits: []store.Commit{
+			{
+				SHA:          "aaa111",
+				Author:       "Dan",
+				CommittedAt:  indexedAt.Add(-2 * time.Hour),
+				Message:      "feat: token refresh retry",
+				Summary:      "feat: token refresh retry",
+				ChangedPaths: []string{"auth/refresh.go"},
+			},
+			{
+				SHA:          "bbb222",
+				Author:       "Dan",
+				CommittedAt:  indexedAt.Add(-1 * time.Hour),
+				Message:      "chore: tidy auth handlers",
+				Summary:      "chore: tidy auth handlers",
+				ChangedPaths: []string{"workers/refresh_worker.go"},
+			},
+			{
+				SHA:          "ccc333",
+				Author:       "Dan",
+				CommittedAt:  indexedAt,
+				Message:      "fix: invoice vat reconciliation",
+				Summary:      "fix: invoice vat reconciliation",
+				ChangedPaths: []string{"billing/invoice.txt"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace commits: %v", err)
+	}
+
+	commits, err := sqliteStore.SearchCommits(ctx, repo.ID, "refresh", 10)
+	if err != nil {
+		t.Fatalf("search commits: %v", err)
+	}
+	if len(commits) < 2 {
+		t.Fatalf("expected at least two refresh matches, got %#v", commits)
+	}
+	if commits[0].SHA != "aaa111" || commits[1].SHA != "bbb222" {
+		t.Fatalf("expected summary match before path-only match, got %#v", commits)
+	}
+
+	naturalLanguage, err := sqliteStore.SearchCommits(ctx, repo.ID, "why was invoice vat reconciliation added", 10)
+	if err != nil {
+		t.Fatalf("search commits with natural language query: %v", err)
+	}
+	if len(naturalLanguage) == 0 || naturalLanguage[0].SHA != "ccc333" {
+		t.Fatalf("expected invoice commit for natural language query, got %#v", naturalLanguage)
+	}
+
+	if _, err := sqliteStore.db.ExecContext(ctx, `DELETE FROM commits_fts WHERE repo_id = ?`, repo.ID); err != nil {
+		t.Fatalf("clear commit fts index: %v", err)
+	}
+
+	rebuilt, err := sqliteStore.SearchCommits(ctx, repo.ID, "refresh retry", 10)
+	if err != nil {
+		t.Fatalf("search commits after clearing fts index: %v", err)
+	}
+	if len(rebuilt) != 1 || rebuilt[0].SHA != "aaa111" {
+		t.Fatalf("expected search to rebuild missing fts index, got %#v", rebuilt)
+	}
+}

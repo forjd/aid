@@ -62,8 +62,8 @@ Working global flags:
 - `aid handoff generate` saves a persistent handoff snapshot.
 - `aid handoff list` reads saved handoffs.
 - `aid history index` stores commit metadata in SQLite.
-- `aid history search` searches indexed commits.
-- `aid recall` searches notes, decisions, handoffs, and indexed commits together.
+- `aid history search` searches indexed commits with SQLite FTS ranking.
+- `aid recall` searches notes, decisions, handoffs, and indexed commits together, reusing commit search ranking.
 - Human-readable output, `--brief`, and `--json` are implemented for the working commands.
 - The repo includes a static skill package at [skills/aid/SKILL.md](../skills/aid/SKILL.md).
 - Tests cover the main end-to-end command flows.
@@ -71,15 +71,13 @@ Working global flags:
 ## Partial
 
 - `--verbose` is parsed globally but does not yet have distinct richer renderers.
-- History search works, but it currently uses simple SQL `LIKE` matching rather than SQLite FTS.
-- Recall ranking is basic branch-aware filtering, not tuned relevance scoring.
+- Recall ranking for notes, decisions, and handoffs is still basic branch-aware filtering; only commits use FTS relevance ranking.
 - Handoff summaries are useful, but still heuristic and fairly simple.
 - Repo config is created, but only lightly used after init.
 - The Go module path is still the local placeholder `module aid`.
 
 ## Not Started
 
-- SQLite FTS-backed history and recall ranking.
 - Optional embeddings / semantic search.
 - Incremental history indexing instead of replacing the full commit index each run.
 - Richer handoff generation with open questions and more deliberate next-step synthesis.
@@ -102,9 +100,9 @@ Working global flags:
 
 ## Recommended Next Work
 
-1. Replace commit search with SQLite FTS and reuse that ranking in `recall`.
-2. Make `--verbose` materially different from the default human-readable output.
-3. Improve `resume` and handoff ranking so active work and suggested next steps are more reliable.
+1. Make `--verbose` materially different from the default human-readable output.
+2. Improve `resume` and handoff ranking so active work and suggested next steps are more reliable.
+3. Extend search ranking beyond commits so notes, decisions, and handoffs get stronger relevance ordering.
 4. Move from full history reindexing to incremental indexing.
 5. Rename the Go module once the canonical repository path is known.
 
@@ -113,4 +111,3 @@ Working global flags:
 - The current implementation already satisfies the practical MVP command surface.
 - Remaining work is mostly quality, ranking, and polish rather than missing core commands.
 - Future sessions should treat this file as the source of truth for implementation status.
-

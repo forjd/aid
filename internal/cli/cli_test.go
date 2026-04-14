@@ -434,6 +434,11 @@ func TestHistoryIndexAndSearch(t *testing.T) {
 		t.Fatalf("expected invoice search result, got %q", briefSearch)
 	}
 
+	naturalLanguageSearch := runCLI(t, "history", "search", "why was invoice vat reconciliation added", "--brief")
+	if !strings.Contains(naturalLanguageSearch, "invoice vat reconciliation") {
+		t.Fatalf("expected natural language search result, got %q", naturalLanguageSearch)
+	}
+
 	jsonSearch := runCLI(t, "history", "search", "refresh", "--json")
 	var payload struct {
 		OK      bool   `json:"ok"`
@@ -525,6 +530,58 @@ func TestRecallSearchesAcrossStoredContext(t *testing.T) {
 	}
 	if len(payload.Data.Notes) == 0 || len(payload.Data.Decisions) == 0 || len(payload.Data.Handoffs) == 0 || len(payload.Data.Commits) == 0 {
 		t.Fatalf("expected recall results across categories: %#v", payload.Data)
+	}
+}
+
+func TestRecallReusesCommitSearchRanking(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "auth.txt"), []byte("refresh\n"))
+	runGit(t, repoDir, "add", "auth.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: token refresh retry")
+	writeFile(t, filepath.Join(repoDir, "refresh_worker.txt"), []byte("worker\n"))
+	runGit(t, repoDir, "add", "refresh_worker.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "chore: tidy auth handlers")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "history", "index")
+
+	jsonRecall := runCLI(t, "recall", "refresh", "--json")
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			Commits []struct {
+				Summary string `json:"summary"`
+			} `json:"commits"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonRecall), &payload); err != nil {
+		t.Fatalf("unmarshal recall json: %v\n%s", err, jsonRecall)
+	}
+	if !payload.OK || payload.Command != "recall" {
+		t.Fatalf("unexpected recall payload: %#v", payload)
+	}
+	if len(payload.Data.Commits) < 2 {
+		t.Fatalf("expected at least two commit matches, got %#v", payload.Data.Commits)
+	}
+	if payload.Data.Commits[0].Summary != "feat: token refresh retry" {
+		t.Fatalf("expected recall to preserve commit relevance order, got %#v", payload.Data.Commits)
 	}
 }
 

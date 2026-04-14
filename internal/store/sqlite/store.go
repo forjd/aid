@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"aid/internal/store"
 
@@ -117,6 +118,15 @@ func (s *Store) Migrate(ctx context.Context) error {
 			indexed_at TEXT NOT NULL,
 			FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
 		)`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS commits_fts USING fts5(
+			summary,
+			message,
+			changed_paths,
+			sha,
+			commit_id UNINDEXED,
+			repo_id UNINDEXED,
+			tokenize = 'porter unicode61'
+		)`,
 		`CREATE TABLE IF NOT EXISTS search_chunks (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			repo_id INTEGER NOT NULL,
@@ -130,6 +140,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_notes_repo_created_at ON notes(repo_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_repo_updated_at ON tasks(repo_id, updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_decisions_repo_created_at ON decisions(repo_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_commits_repo_committed_at ON commits(repo_id, committed_at DESC)`,
 	}
 
 	for _, statement := range statements {
@@ -470,6 +481,10 @@ func (s *Store) ReplaceCommits(ctx context.Context, input store.ReplaceCommitsIn
 		}
 	}
 
+	if err := rebuildCommitFTS(ctx, tx, input.RepoID); err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit commit index transaction: %w", err)
 	}
@@ -478,16 +493,24 @@ func (s *Store) ReplaceCommits(ctx context.Context, input store.ReplaceCommitsIn
 }
 
 func (s *Store) SearchCommits(ctx context.Context, repoID int64, query string, limit int) ([]store.Commit, error) {
-	pattern := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
+	ftsQuery := buildCommitFTSQuery(query)
+	if ftsQuery == "" {
+		return nil, nil
+	}
+
+	if err := s.ensureCommitFTS(ctx, repoID); err != nil {
+		return nil, err
+	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, repo_id, sha, author, committed_at, message, changed_paths, summary, indexed_at
-		FROM commits
-		WHERE repo_id = ?
-		  AND LOWER(summary || ' ' || message || ' ' || changed_paths) LIKE ?
-		ORDER BY committed_at DESC, id DESC
+		SELECT c.id, c.repo_id, c.sha, c.author, c.committed_at, c.message, c.changed_paths, c.summary, c.indexed_at
+		FROM commits_fts
+		JOIN commits c ON c.id = commits_fts.commit_id
+		WHERE commits_fts.repo_id = ?
+		  AND commits_fts MATCH ?
+		ORDER BY bm25(commits_fts, 10.0, 5.0, 1.0, 20.0), c.committed_at DESC, c.id DESC
 		LIMIT ?
-	`, repoID, pattern, limit)
+	`, repoID, ftsQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search commits: %w", err)
 	}
@@ -564,6 +587,32 @@ func (s *Store) StatusCounts(ctx context.Context, repoID int64) (store.StatusCou
 	}
 
 	return counts, nil
+}
+
+func (s *Store) ensureCommitFTS(ctx context.Context, repoID int64) error {
+	var commitCount int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM commits
+		WHERE repo_id = ?
+	`, repoID).Scan(&commitCount); err != nil {
+		return fmt.Errorf("count commits: %w", err)
+	}
+
+	var indexedCount int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM commits_fts
+		WHERE repo_id = ?
+	`, repoID).Scan(&indexedCount); err != nil {
+		return fmt.Errorf("count indexed commits: %w", err)
+	}
+
+	if indexedCount == commitCount {
+		return nil
+	}
+
+	return rebuildCommitFTS(ctx, s.db, repoID)
 }
 
 func (s *Store) noteByID(ctx context.Context, id int64) (store.Note, error) {
@@ -739,6 +788,113 @@ func scanCommit(row scanner) (store.Commit, error) {
 		commit.ChangedPaths = strings.Split(changedPaths, "\n")
 	}
 	return commit, nil
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func rebuildCommitFTS(ctx context.Context, execer execer, repoID int64) error {
+	if _, err := execer.ExecContext(ctx, `
+		DELETE FROM commits_fts
+		WHERE repo_id = ?
+	`, repoID); err != nil {
+		return fmt.Errorf("clear commit fts index: %w", err)
+	}
+
+	if _, err := execer.ExecContext(ctx, `
+		INSERT INTO commits_fts (summary, message, changed_paths, sha, commit_id, repo_id)
+		SELECT summary, message, changed_paths, sha, id, repo_id
+		FROM commits
+		WHERE repo_id = ?
+	`, repoID); err != nil {
+		return fmt.Errorf("rebuild commit fts index: %w", err)
+	}
+
+	return nil
+}
+
+func buildCommitFTSQuery(raw string) string {
+	tokens := uniqueSearchTokens(raw)
+	if len(tokens) == 0 {
+		return ""
+	}
+
+	filtered := filterStopWords(tokens)
+	if len(filtered) > 0 {
+		tokens = filtered
+	}
+
+	joiner := " AND "
+	if len(tokens) > 3 {
+		joiner = " OR "
+	}
+
+	terms := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		terms = append(terms, token+"*")
+	}
+
+	return strings.Join(terms, joiner)
+}
+
+func uniqueSearchTokens(raw string) []string {
+	parts := strings.FieldsFunc(strings.ToLower(raw), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+
+	seen := make(map[string]struct{}, len(parts))
+	tokens := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		tokens = append(tokens, part)
+	}
+
+	return tokens
+}
+
+func filterStopWords(tokens []string) []string {
+	filtered := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if _, ok := commitSearchStopWords[token]; ok {
+			continue
+		}
+		filtered = append(filtered, token)
+	}
+	return filtered
+}
+
+var commitSearchStopWords = map[string]struct{}{
+	"a":     {},
+	"an":    {},
+	"and":   {},
+	"are":   {},
+	"did":   {},
+	"do":    {},
+	"does":  {},
+	"for":   {},
+	"how":   {},
+	"in":    {},
+	"is":    {},
+	"of":    {},
+	"on":    {},
+	"or":    {},
+	"the":   {},
+	"to":    {},
+	"was":   {},
+	"were":  {},
+	"what":  {},
+	"when":  {},
+	"where": {},
+	"which": {},
+	"why":   {},
+	"with":  {},
 }
 
 func nowUTC() time.Time {

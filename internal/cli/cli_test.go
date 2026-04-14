@@ -327,6 +327,70 @@ func TestResumeOutputsWorkingSummary(t *testing.T) {
 	}
 }
 
+func TestHandoffGenerateAndList(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("hello\n"))
+	runGit(t, repoDir, "add", "README.md")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: initial repo memory support")
+	writeFile(t, filepath.Join(repoDir, "NOTES.txt"), []byte("dirty tree\n"))
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "note", "add", "Token refresh bug occurs after 401 retry")
+	_ = runCLI(t, "task", "add", "Fix token refresh retry path")
+	_ = runCLI(t, "decide", "add", "Store money as integer pence")
+
+	generateOut := runCLI(t, "handoff", "generate", "--brief")
+	for _, want := range []string{
+		"Branch: main",
+		"Worktree: dirty",
+		"Open tasks:",
+		"Recent notes:",
+		"Key decisions:",
+		"Recent commits:",
+	} {
+		if !strings.Contains(generateOut, want) {
+			t.Fatalf("expected handoff output to contain %q\n\n%s", want, generateOut)
+		}
+	}
+
+	jsonList := runCLI(t, "handoff", "list", "--json")
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			Handoffs []struct {
+				ID      string `json:"id"`
+				Summary string `json:"summary"`
+			} `json:"handoffs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonList), &payload); err != nil {
+		t.Fatalf("unmarshal handoff json: %v\n%s", err, jsonList)
+	}
+	if !payload.OK || payload.Command != "handoff list" {
+		t.Fatalf("unexpected handoff list payload: %#v", payload)
+	}
+	if len(payload.Data.Handoffs) != 1 || !strings.Contains(payload.Data.Handoffs[0].Summary, "Worktree: dirty") {
+		t.Fatalf("unexpected handoffs: %#v", payload.Data.Handoffs)
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 

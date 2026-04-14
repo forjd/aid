@@ -14,10 +14,11 @@ This repository now has a Go-first scaffold:
 - SQLite-backed `init`, `note`, `task`, and `decide` commands
 - a real `status` command
 - a real `resume` command with active-task inference and recent commit summaries
+- explicit `handoff generate` and `handoff list` support backed by SQLite
 - package boundaries for storage, Git, search, resume, handoff, and output
 - a static skill package location for agents
 
-The repository is still early. `recall`, `handoff`, and `history` remain stubs while the core persistence slice settles.
+The repository is still early. `recall` and `history` remain stubs while the core persistence slice settles.
 
 ## Why Go
 
@@ -57,6 +58,7 @@ go run ./cmd/aid init
 go run ./cmd/aid status --brief
 go run ./cmd/aid note add "Refresh token bug occurs after 401 retry"
 go run ./cmd/aid resume --brief
+go run ./cmd/aid handoff generate --brief
 go run ./cmd/aid note list --json
 go test ./...
 ```

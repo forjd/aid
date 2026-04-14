@@ -259,8 +259,8 @@ func rootCommand() *Command {
 			"aid handoff list",
 		},
 		Children: []*Command{
-			stubCommand("generate", "aid handoff generate", "generate", "aid handoff generate [options]", "Create a structured handoff summary"),
-			stubCommand("list", "aid handoff list", "list", "aid handoff list [options]", "List saved handoffs"),
+			command("generate", "aid handoff generate", "generate", "aid handoff generate [options]", "Create a structured handoff summary", handoffGenerateCommand),
+			command("list", "aid handoff list", "list", "aid handoff list [options]", "List saved handoffs", handoffListCommand),
 		},
 	}
 

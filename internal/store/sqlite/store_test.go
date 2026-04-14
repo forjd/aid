@@ -113,4 +113,21 @@ func TestStoreCRUDFlow(t *testing.T) {
 	if counts.Tasks.Total != 1 || counts.Tasks.Done != 1 {
 		t.Fatalf("unexpected task counts: %#v", counts.Tasks)
 	}
+
+	handoff, err := sqliteStore.AddHandoff(ctx, store.AddHandoffInput{
+		RepoID:  repo.ID,
+		Branch:  "main",
+		Summary: "Branch: main",
+	})
+	if err != nil {
+		t.Fatalf("add handoff: %v", err)
+	}
+
+	handoffs, err := sqliteStore.ListHandoffs(ctx, repo.ID, 10)
+	if err != nil {
+		t.Fatalf("list handoffs: %v", err)
+	}
+	if len(handoffs) != 1 || handoffs[0].ID != handoff.ID {
+		t.Fatalf("unexpected handoffs: %#v", handoffs)
+	}
 }

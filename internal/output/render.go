@@ -52,6 +52,10 @@ type ResumeResult struct {
 	Bundle   resumepkg.Bundle
 }
 
+type HandoffGenerateResult struct {
+	Handoff store.Handoff
+}
+
 func (o Options) IsBrief() bool {
 	return o.Format == FormatBrief
 }
@@ -320,6 +324,71 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 	return nil
 }
 
+func RenderHandoffGenerated(w io.Writer, opts Options, result HandoffGenerateResult) error {
+	if opts.IsJSON() {
+		return writeJSON(w, envelope{
+			SchemaVersion: "1",
+			OK:            true,
+			Command:       "handoff generate",
+			Data: struct {
+				Handoff handoffPayload `json:"handoff"`
+			}{
+				Handoff: handoffModel(result.Handoff),
+			},
+			Error: nil,
+		})
+	}
+
+	if opts.IsBrief() {
+		fmt.Fprintln(w, result.Handoff.Summary)
+		return nil
+	}
+
+	fmt.Fprintf(w, "Saved handoff %s%s\n", store.HandoffRef(result.Handoff.ID), branchSuffix(result.Handoff.Branch))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, result.Handoff.Summary)
+	return nil
+}
+
+func RenderHandoffs(w io.Writer, opts Options, handoffs []store.Handoff) error {
+	if opts.IsJSON() {
+		items := make([]handoffPayload, 0, len(handoffs))
+		for _, handoff := range handoffs {
+			items = append(items, handoffModel(handoff))
+		}
+
+		return writeJSON(w, envelope{
+			SchemaVersion: "1",
+			OK:            true,
+			Command:       "handoff list",
+			Data: struct {
+				Handoffs []handoffPayload `json:"handoffs"`
+			}{
+				Handoffs: items,
+			},
+			Error: nil,
+		})
+	}
+
+	if len(handoffs) == 0 {
+		fmt.Fprintln(w, "No handoffs.")
+		return nil
+	}
+
+	if opts.IsBrief() {
+		for _, handoff := range handoffs {
+			fmt.Fprintf(w, "%s%s %s\n", store.HandoffRef(handoff.ID), branchSuffix(handoff.Branch), previewLine(handoff.Summary))
+		}
+		return nil
+	}
+
+	fmt.Fprintln(w, "Handoffs:")
+	for _, handoff := range handoffs {
+		fmt.Fprintf(w, "- %s%s %s\n", store.HandoffRef(handoff.ID), branchSuffix(handoff.Branch), previewLine(handoff.Summary))
+	}
+	return nil
+}
+
 func RenderNoteAdded(w io.Writer, opts Options, note store.Note) error {
 	if opts.IsJSON() {
 		return writeJSON(w, envelope{
@@ -580,6 +649,13 @@ type commitPayload struct {
 	ChangedPaths []string `json:"changed_paths"`
 }
 
+type handoffPayload struct {
+	ID        string  `json:"id"`
+	Branch    *string `json:"branch"`
+	Summary   string  `json:"summary"`
+	CreatedAt string  `json:"created_at"`
+}
+
 func writeJSON(w io.Writer, value any) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
@@ -647,6 +723,15 @@ func commitModel(commit git.Commit) commitPayload {
 	}
 }
 
+func handoffModel(handoff store.Handoff) handoffPayload {
+	return handoffPayload{
+		ID:        store.HandoffRef(handoff.ID),
+		Branch:    nullableString(handoff.Branch),
+		Summary:   handoff.Summary,
+		CreatedAt: handoff.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
 func branchSuffix(branch string) string {
 	if branch == "" {
 		return ""
@@ -670,4 +755,15 @@ func shortSHA(value string) string {
 	}
 
 	return value[:7]
+}
+
+func previewLine(value string) string {
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+
+	return ""
 }

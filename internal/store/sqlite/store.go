@@ -379,6 +379,59 @@ func (s *Store) ListDecisions(ctx context.Context, repoID int64, limit int) ([]s
 	return decisions, nil
 }
 
+func (s *Store) AddHandoff(ctx context.Context, input store.AddHandoffInput) (store.Handoff, error) {
+	now := nowUTC()
+
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO handoffs (repo_id, branch, summary, created_at)
+		VALUES (?, ?, ?, ?)
+	`, input.RepoID, nullableString(input.Branch), input.Summary, formatTime(now))
+	if err != nil {
+		return store.Handoff{}, fmt.Errorf("add handoff: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return store.Handoff{}, fmt.Errorf("handoff last insert id: %w", err)
+	}
+
+	handoff, err := s.handoffByID(ctx, id)
+	if err != nil {
+		return store.Handoff{}, err
+	}
+
+	return handoff, nil
+}
+
+func (s *Store) ListHandoffs(ctx context.Context, repoID int64, limit int) ([]store.Handoff, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, repo_id, branch, summary, created_at
+		FROM handoffs
+		WHERE repo_id = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
+	`, repoID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list handoffs: %w", err)
+	}
+	defer rows.Close()
+
+	var handoffs []store.Handoff
+	for rows.Next() {
+		handoff, err := scanHandoff(rows)
+		if err != nil {
+			return nil, err
+		}
+		handoffs = append(handoffs, handoff)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate handoffs: %w", err)
+	}
+
+	return handoffs, nil
+}
+
 func (s *Store) StatusCounts(ctx context.Context, repoID int64) (store.StatusCounts, error) {
 	var counts store.StatusCounts
 
@@ -481,6 +534,21 @@ func (s *Store) decisionByID(ctx context.Context, id int64) (store.Decision, err
 	return decision, nil
 }
 
+func (s *Store) handoffByID(ctx context.Context, id int64) (store.Handoff, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, repo_id, branch, summary, created_at
+		FROM handoffs
+		WHERE id = ?
+	`, id)
+
+	handoff, err := scanHandoff(row)
+	if err != nil {
+		return store.Handoff{}, fmt.Errorf("load handoff: %w", err)
+	}
+
+	return handoff, nil
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -552,6 +620,20 @@ func scanDecision(row scanner) (store.Decision, error) {
 		decision.Rationale = &value
 	}
 	return decision, nil
+}
+
+func scanHandoff(row scanner) (store.Handoff, error) {
+	var handoff store.Handoff
+	var branch sql.NullString
+	var createdAt string
+
+	if err := row.Scan(&handoff.ID, &handoff.RepoID, &branch, &handoff.Summary, &createdAt); err != nil {
+		return store.Handoff{}, fmt.Errorf("scan handoff: %w", err)
+	}
+
+	handoff.Branch = branch.String
+	handoff.CreatedAt = parseTime(createdAt)
+	return handoff, nil
 }
 
 func nowUTC() time.Time {

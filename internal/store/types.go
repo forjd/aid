@@ -61,6 +61,14 @@ type Decision struct {
 	CreatedAt time.Time
 }
 
+type Handoff struct {
+	ID        int64
+	RepoID    int64
+	Branch    string
+	Summary   string
+	CreatedAt time.Time
+}
+
 type TaskCounts struct {
 	Total      int `json:"total"`
 	Open       int `json:"open"`
@@ -97,6 +105,12 @@ type AddDecisionInput struct {
 	Rationale *string
 }
 
+type AddHandoffInput struct {
+	RepoID  int64
+	Branch  string
+	Summary string
+}
+
 type Store interface {
 	Close() error
 	Migrate(ctx context.Context) error
@@ -109,6 +123,8 @@ type Store interface {
 	CompleteTask(ctx context.Context, repoID int64, taskID int64) (Task, error)
 	AddDecision(ctx context.Context, input AddDecisionInput) (Decision, error)
 	ListDecisions(ctx context.Context, repoID int64, limit int) ([]Decision, error)
+	AddHandoff(ctx context.Context, input AddHandoffInput) (Handoff, error)
+	ListHandoffs(ctx context.Context, repoID int64, limit int) ([]Handoff, error)
 	StatusCounts(ctx context.Context, repoID int64) (StatusCounts, error)
 }
 
@@ -122,6 +138,10 @@ func TaskRef(id int64) string {
 
 func DecisionRef(id int64) string {
 	return fmt.Sprintf("decision_%d", id)
+}
+
+func HandoffRef(id int64) string {
+	return fmt.Sprintf("handoff_%d", id)
 }
 
 func ParseTaskRef(value string) (int64, error) {

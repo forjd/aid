@@ -1,3 +1,9 @@
+---
+name: aid
+description: Capture and recall working context with the `aid` CLI in this repository. Use when resuming prior work, recording important findings, tracking meaningful tasks, storing engineering decisions, searching saved context, or generating a handoff for the next session.
+compatibility: Intended for this repository and requires the local `aid` CLI to be available.
+---
+
 # Using aid in this repository
 
 ## Purpose
@@ -56,4 +62,3 @@ Generate a handoff:
 - Do not spam notes for trivial observations.
 - Prefer targeted recall queries over broad searches.
 - Prefer `--brief` unless richer structure is needed.
-

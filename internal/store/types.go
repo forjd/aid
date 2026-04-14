@@ -1,0 +1,133 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Scope string
+
+const (
+	ScopeRepo   Scope = "repo"
+	ScopeBranch Scope = "branch"
+)
+
+type TaskStatus string
+
+const (
+	TaskOpen       TaskStatus = "open"
+	TaskInProgress TaskStatus = "in_progress"
+	TaskDone       TaskStatus = "done"
+	TaskBlocked    TaskStatus = "blocked"
+)
+
+type Repo struct {
+	ID        int64
+	Path      string
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type Note struct {
+	ID        int64
+	RepoID    int64
+	Branch    string
+	Scope     Scope
+	Text      string
+	CreatedAt time.Time
+}
+
+type Task struct {
+	ID        int64
+	RepoID    int64
+	Branch    string
+	Scope     Scope
+	Text      string
+	Status    TaskStatus
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type Decision struct {
+	ID        int64
+	RepoID    int64
+	Branch    string
+	Text      string
+	Rationale *string
+	CreatedAt time.Time
+}
+
+type AddNoteInput struct {
+	RepoID int64
+	Branch string
+	Scope  Scope
+	Text   string
+}
+
+type AddTaskInput struct {
+	RepoID int64
+	Branch string
+	Scope  Scope
+	Text   string
+	Status TaskStatus
+}
+
+type AddDecisionInput struct {
+	RepoID    int64
+	Branch    string
+	Text      string
+	Rationale *string
+}
+
+type Store interface {
+	Close() error
+	Migrate(ctx context.Context) error
+	UpsertRepo(ctx context.Context, path string, name string) (Repo, error)
+	FindRepoByPath(ctx context.Context, path string) (*Repo, error)
+	AddNote(ctx context.Context, input AddNoteInput) (Note, error)
+	ListNotes(ctx context.Context, repoID int64, limit int) ([]Note, error)
+	AddTask(ctx context.Context, input AddTaskInput) (Task, error)
+	ListTasks(ctx context.Context, repoID int64, limit int) ([]Task, error)
+	CompleteTask(ctx context.Context, repoID int64, taskID int64) (Task, error)
+	AddDecision(ctx context.Context, input AddDecisionInput) (Decision, error)
+	ListDecisions(ctx context.Context, repoID int64, limit int) ([]Decision, error)
+}
+
+func NoteRef(id int64) string {
+	return fmt.Sprintf("note_%d", id)
+}
+
+func TaskRef(id int64) string {
+	return fmt.Sprintf("task_%d", id)
+}
+
+func DecisionRef(id int64) string {
+	return fmt.Sprintf("decision_%d", id)
+}
+
+func ParseTaskRef(value string) (int64, error) {
+	return parseRef("task", value)
+}
+
+func parseRef(prefix, value string) (int64, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, fmt.Errorf("missing %s id", prefix)
+	}
+
+	numeric := trimmed
+	if strings.HasPrefix(trimmed, prefix+"_") {
+		numeric = strings.TrimPrefix(trimmed, prefix+"_")
+	}
+
+	id, err := strconv.ParseInt(numeric, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid %s id %q", prefix, value)
+	}
+
+	return id, nil
+}

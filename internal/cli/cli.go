@@ -37,7 +37,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 func dispatch(cmd *Command, args []string, streams Streams) error {
-	if len(args) == 0 || isHelpFlag(args[0]) {
+	if len(args) == 0 {
+		if cmd.Run != nil {
+			return cmd.Run(nil, streams)
+		}
+
+		renderHelp(cmd, streams.Out)
+		return nil
+	}
+
+	if isHelpFlag(args[0]) {
 		renderHelp(cmd, streams.Out)
 		return nil
 	}
@@ -150,8 +159,8 @@ func rootCommand() *Command {
 			"aid note list",
 		},
 		Children: []*Command{
-			stubCommand("add", "aid note add", "add <text>", "aid note add <text>", "Add a note"),
-			stubCommand("list", "aid note list", "list", "aid note list", "List recent notes"),
+			command("add", "aid note add", "add <text>", "aid note add <text>", "Add a note", noteAddCommand),
+			command("list", "aid note list", "list", "aid note list", "List recent notes", noteListCommand),
 		},
 	}
 
@@ -168,9 +177,9 @@ func rootCommand() *Command {
 			"aid task done task_12",
 		},
 		Children: []*Command{
-			stubCommand("add", "aid task add", "add <text>", "aid task add <text>", "Add a task"),
-			stubCommand("list", "aid task list", "list", "aid task list", "List tasks"),
-			stubCommand("done", "aid task done", "done <id>", "aid task done <id>", "Mark a task as done"),
+			command("add", "aid task add", "add <text>", "aid task add <text>", "Add a task", taskAddCommand),
+			command("list", "aid task list", "list", "aid task list", "List tasks", taskListCommand),
+			command("done", "aid task done", "done <id>", "aid task done <id>", "Mark a task as done", taskDoneCommand),
 		},
 	}
 
@@ -186,8 +195,8 @@ func rootCommand() *Command {
 			"aid decide list",
 		},
 		Children: []*Command{
-			stubCommand("add", "aid decide add", "add <text>", "aid decide add <text>", "Record an engineering decision"),
-			stubCommand("list", "aid decide list", "list", "aid decide list", "List decisions"),
+			command("add", "aid decide add", "add <text>", "aid decide add <text>", "Record an engineering decision", decisionAddCommand),
+			command("list", "aid decide list", "list", "aid decide list", "List decisions", decisionListCommand),
 		},
 	}
 
@@ -239,7 +248,7 @@ func rootCommand() *Command {
 			`aid history search "invoice VAT reconciliation"`,
 		},
 		Children: []*Command{
-			stubCommand("init", "aid init", "init", "aid init", "Initialise aid in the current repository"),
+			command("init", "aid init", "init", "aid init", "Initialise aid in the current repository", initCommand),
 			stubCommand("status", "aid status", "status", "aid status", "Show repo memory status"),
 			stubCommand("resume", "aid resume", "resume", "aid resume", "Show a compact working summary"),
 			stubCommand("recall", "aid recall", "recall <query>", "aid recall <query>", "Search notes, decisions, handoffs, and commits"),
@@ -253,6 +262,13 @@ func rootCommand() *Command {
 }
 
 func stubCommand(name, path, use, usage, summary string) *Command {
+	return command(name, path, use, usage, summary, func(_ []string, streams Streams) error {
+		fmt.Fprintf(streams.Out, "%s is scaffolded but not implemented yet.\n", path)
+		return nil
+	})
+}
+
+func command(name, path, use, usage, summary string, run func(args []string, streams Streams) error) *Command {
 	return &Command{
 		Name:        name,
 		Path:        path,
@@ -260,9 +276,6 @@ func stubCommand(name, path, use, usage, summary string) *Command {
 		Usage:       usage,
 		Summary:     summary,
 		Description: fmt.Sprintf("%s - %s", path, summary),
-		Run: func(_ []string, streams Streams) error {
-			fmt.Fprintf(streams.Out, "%s is scaffolded but not implemented yet.\n", path)
-			return nil
-		},
+		Run:         run,
 	}
 }

@@ -10,10 +10,11 @@ This repository now has a Go-first scaffold:
 
 - a compilable CLI entrypoint
 - a command tree and help surface
+- SQLite-backed `init`, `note`, `task`, and `decide` commands
 - package boundaries for storage, Git, search, resume, handoff, and output
 - a static skill package location for agents
 
-The implementation is intentionally shallow at this stage. Commands exist as stubs so the repo shape, docs, and build flow are settled before storage and workflows land.
+The repository is still early. `status`, `resume`, `recall`, `handoff`, and `history` remain stubs while the core persistence slice settles.
 
 ## Why Go
 
@@ -49,6 +50,8 @@ skills/aid/          static skill package for compatible agents
 ```bash
 make build
 go run ./cmd/aid --help
+go run ./cmd/aid init
+go run ./cmd/aid note add "Refresh token bug occurs after 401 retry"
 go test ./...
 ```
 
@@ -73,8 +76,3 @@ Use it for:
 - links to the deeper docs
 
 Do not use it as the full product spec. That content belongs in `docs/spec/mvp.md`, where it can grow without turning the repo homepage into a wall of text.
-
-
-If the MVP works, `aid` becomes the first command an agent runs when entering a repository, and the last command it runs before leaving.
-
-The next sensible step is to turn this into a polished `README.md` plus a first draft of a static `SKILL.md` package.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/forjd/aid/compare/v0.1.1...v0.2.0) (2026-04-14)
+
+
+### Features
+
+* add release installer script ([2285703](https://github.com/forjd/aid/commit/2285703127d3e367b3b1fe037d4eb1d837075844))
+
 ## [0.1.1](https://github.com/forjd/aid/compare/v0.1.0...v0.1.1) (2026-04-14)
 
 

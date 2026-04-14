@@ -70,7 +70,7 @@ Working global flags:
 - `aid history search` searches indexed commits with SQLite FTS ranking.
 - `aid recall` searches notes, decisions, handoffs, and indexed commits together with SQLite FTS ranking across all stored context types.
 - Human-readable output, `--brief`, `--verbose`, and `--json` are implemented for the working commands.
-- The repo includes a static skill package at [skills/aid/SKILL.md](../skills/aid/SKILL.md).
+- The repo includes a static skill package at [.agents/skills/aid/SKILL.md](../.agents/skills/aid/SKILL.md).
 - Tests cover the main end-to-end command flows.
 - `aid resume` now carries richer next-action heuristics, open questions, and the latest saved handoff when available.
 - `aid handoff generate` now includes open questions and more deliberate next-action synthesis.

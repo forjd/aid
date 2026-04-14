@@ -16,7 +16,7 @@ default_mode = "brief"
 ignore_paths = ["vendor/", "node_modules/", "storage/"]
 
 [agent]
-skill_path = "skills/aid/SKILL.md"
+skill_path = ".agents/skills/aid/SKILL.md"
 `
 
 type RepoConfig struct {

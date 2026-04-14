@@ -88,6 +88,17 @@ If you prefer to run without building a binary first:
 go run ./cmd/aid --help
 ```
 
+### Install the agent skill
+
+The repository ships a checked-in skill at `.agents/skills/aid/SKILL.md`.
+
+Install it into a compatible agent with `skills add`:
+
+```bash
+npx skills add https://github.com/forjd/aid/tree/main/.agents/skills/aid
+bunx skills add https://github.com/forjd/aid/tree/main/.agents/skills/aid
+```
+
 ### Initialize and use it
 
 ```bash
@@ -127,7 +138,7 @@ internal/search/        ranking and retrieval logic
 internal/store/         storage interfaces
 internal/store/sqlite/  SQLite implementation details
 docs/spec/              product specs and longer-form design docs
-skills/aid/             static skill package for compatible agents
+.agents/skills/aid/     checked-in skill package for compatible agents
 ```
 
 ## Project Status
@@ -151,7 +162,7 @@ This setup depends on a repository secret named `RELEASE_PLEASE_TOKEN`. Using th
 - [MVP status](docs/mvp-status.md) for the current implementation tracker
 - [MVP spec](docs/spec/mvp.md) for scope, goals, and non-goals
 - [Architecture notes](docs/architecture.md) for package boundaries and design constraints
-- [Agent skill package](skills/aid/SKILL.md) for agent usage guidance
+- [Agent skill package](.agents/skills/aid/SKILL.md) for agent usage guidance
 - [Contributing guide](CONTRIBUTING.md) for development and pull request expectations
 - [MIT license](LICENSE)
 

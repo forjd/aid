@@ -677,7 +677,7 @@ This file should explain:
 
 The skill should be version-controlled and maintained like any other repo artifact. It should not be generated dynamically by `aid`.
 
-Users can install it into compatible agents with tools such as `npx skills` or `bunx skills`, or by copying it manually.
+Users can install it into compatible agents with `npx skills add` or `bunx skills add`, or by copying it manually.
 
 ### Proposed format
 
@@ -687,7 +687,7 @@ A standard skill package centered on:
 
 Suggested repo path:
 
-- `skills/aid/SKILL.md`
+- `.agents/skills/aid/SKILL.md`
 
 ### Skill file objectives
 
@@ -789,7 +789,7 @@ default_mode = "brief"
 ignore_paths = ["vendor/", "node_modules/", "storage/"]
 
 [agent]
-skill_path = "skills/aid/SKILL.md"
+skill_path = ".agents/skills/aid/SKILL.md"
 ```
 
 ---

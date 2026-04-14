@@ -348,7 +348,7 @@ default_mode = "verbose"
 ignore_paths = ["vendor/"]
 
 [agent]
-skill_path = "skills/aid/SKILL.md"
+skill_path = ".agents/skills/aid/SKILL.md"
 `))
 
 	defaultStatus := runCLI(t, "status")

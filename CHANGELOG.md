@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/forjd/aid/compare/v0.3.0...v0.3.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* preserve indexed commit ordering ([13e87a7](https://github.com/forjd/aid/commit/13e87a7b6d86c543e005ba2df30cba6b238bf796))
+
 ## [0.3.0](https://github.com/forjd/aid/compare/v0.2.0...v0.3.0) (2026-04-14)
 
 

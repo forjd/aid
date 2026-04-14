@@ -52,6 +52,30 @@ When opening a pull request:
 - Note any user-facing CLI or output changes.
 - Include documentation updates when relevant.
 - Mention any follow-up work that is intentionally out of scope.
+- Prefer squash merges so the final merge title is the release signal that lands on `main`.
+
+## Release Automation
+
+- Do not create release tags manually as the default workflow. Tags and GitHub Releases are created by `release-please` after its release PR is merged.
+- Make sure the repository secret `RELEASE_PLEASE_TOKEN` is configured before relying on automated releases.
+- If GitHub Actions cannot open release PRs, check that repository settings allow GitHub Actions to create and approve pull requests.
+
+## Commit Titles
+
+Release automation assumes Conventional Commit semantics on changes that land in `main`.
+
+- `feat:` creates a SemVer minor release.
+- `fix:` creates a SemVer patch release.
+- `type!:` or a `BREAKING CHANGE:` footer creates a SemVer major release.
+- `docs:`, `chore:`, `test:`, and `ci:` do not normally create a release by themselves.
+
+Examples:
+
+- `feat: add recall ranking explanation to brief output`
+- `feat(search): support repo override for recall`
+- `fix: handle detached HEAD in repo status`
+- `fix(cli): keep --json errors on stderr`
+- `feat!: rename handoff schema fields`
 
 ## Good First Contributions
 

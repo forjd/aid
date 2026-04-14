@@ -8,6 +8,7 @@ import (
 
 	"aid/internal/git"
 	resumepkg "aid/internal/resume"
+	searchpkg "aid/internal/search"
 	"aid/internal/store"
 )
 
@@ -54,6 +55,19 @@ type ResumeResult struct {
 
 type HandoffGenerateResult struct {
 	Handoff store.Handoff
+}
+
+type HistoryIndexResult struct {
+	Indexed int
+}
+
+type HistorySearchResult struct {
+	Query   string
+	Commits []store.Commit
+}
+
+type RecallResult struct {
+	Result searchpkg.Result
 }
 
 func (o Options) IsBrief() bool {
@@ -386,6 +400,148 @@ func RenderHandoffs(w io.Writer, opts Options, handoffs []store.Handoff) error {
 	for _, handoff := range handoffs {
 		fmt.Fprintf(w, "- %s%s %s\n", store.HandoffRef(handoff.ID), branchSuffix(handoff.Branch), previewLine(handoff.Summary))
 	}
+	return nil
+}
+
+func RenderHistoryIndexed(w io.Writer, opts Options, result HistoryIndexResult) error {
+	if opts.IsJSON() {
+		return writeJSON(w, envelope{
+			SchemaVersion: "1",
+			OK:            true,
+			Command:       "history index",
+			Data: struct {
+				Indexed int `json:"indexed"`
+			}{
+				Indexed: result.Indexed,
+			},
+			Error: nil,
+		})
+	}
+
+	fmt.Fprintf(w, "Indexed %d commits.\n", result.Indexed)
+	return nil
+}
+
+func RenderHistorySearch(w io.Writer, opts Options, result HistorySearchResult) error {
+	items := make([]commitPayload, 0, len(result.Commits))
+	for _, commit := range result.Commits {
+		items = append(items, storeCommitModel(commit))
+	}
+
+	if opts.IsJSON() {
+		return writeJSON(w, envelope{
+			SchemaVersion: "1",
+			OK:            true,
+			Command:       "history search",
+			Data: struct {
+				Query   string          `json:"query"`
+				Commits []commitPayload `json:"commits"`
+			}{
+				Query:   result.Query,
+				Commits: items,
+			},
+			Error: nil,
+		})
+	}
+
+	if len(items) == 0 {
+		fmt.Fprintln(w, "No matching commits.")
+		return nil
+	}
+
+	if opts.IsBrief() {
+		for _, commit := range items {
+			fmt.Fprintf(w, "%s %s\n", shortSHA(commit.SHA), commit.Summary)
+		}
+		return nil
+	}
+
+	fmt.Fprintln(w, "Commits:")
+	for _, commit := range items {
+		fmt.Fprintf(w, "- %s %s\n", shortSHA(commit.SHA), commit.Summary)
+		if len(commit.ChangedPaths) > 0 {
+			fmt.Fprintf(w, "  paths: %s\n", strings.Join(commit.ChangedPaths, ", "))
+		}
+	}
+	return nil
+}
+
+func RenderRecall(w io.Writer, opts Options, result RecallResult) error {
+	notes := make([]notePayload, 0, len(result.Result.Notes))
+	for _, note := range result.Result.Notes {
+		notes = append(notes, noteModel(note))
+	}
+
+	decisions := make([]decisionPayload, 0, len(result.Result.Decisions))
+	for _, decision := range result.Result.Decisions {
+		decisions = append(decisions, decisionModel(decision))
+	}
+
+	handoffs := make([]handoffPayload, 0, len(result.Result.Handoffs))
+	for _, handoff := range result.Result.Handoffs {
+		handoffs = append(handoffs, handoffModel(handoff))
+	}
+
+	commits := make([]commitPayload, 0, len(result.Result.Commits))
+	for _, commit := range result.Result.Commits {
+		commits = append(commits, storeCommitModel(commit))
+	}
+
+	if opts.IsJSON() {
+		return writeJSON(w, envelope{
+			SchemaVersion: "1",
+			OK:            true,
+			Command:       "recall",
+			Data: struct {
+				Query     string            `json:"query"`
+				Notes     []notePayload     `json:"notes"`
+				Decisions []decisionPayload `json:"decisions"`
+				Handoffs  []handoffPayload  `json:"handoffs"`
+				Commits   []commitPayload   `json:"commits"`
+			}{
+				Query:     result.Result.Query,
+				Notes:     notes,
+				Decisions: decisions,
+				Handoffs:  handoffs,
+				Commits:   commits,
+			},
+			Error: nil,
+		})
+	}
+
+	if len(notes) == 0 && len(decisions) == 0 && len(handoffs) == 0 && len(commits) == 0 {
+		fmt.Fprintln(w, "No matching context.")
+		return nil
+	}
+
+	if len(notes) > 0 {
+		fmt.Fprintln(w, "Notes:")
+		for _, note := range notes {
+			fmt.Fprintf(w, "- %s%s\n", note.Text, branchSuffixValue(note.Branch))
+		}
+	}
+
+	if len(decisions) > 0 {
+		fmt.Fprintln(w, "Decisions:")
+		for _, decision := range decisions {
+			fmt.Fprintf(w, "- %s%s\n", decision.Text, branchSuffixValue(decision.Branch))
+		}
+	}
+
+	if len(handoffs) > 0 {
+		fmt.Fprintln(w, "Handoffs:")
+		for _, handoff := range handoffs {
+			fmt.Fprintf(w, "- %s%s %s\n", handoff.ID, branchSuffixValue(handoff.Branch), previewLine(handoff.Summary))
+		}
+	}
+
+	if len(commits) > 0 {
+		fmt.Fprintln(w, "Commits:")
+		for _, commit := range commits {
+			fmt.Fprintf(w, "- %s %s\n", shortSHA(commit.SHA), commit.Summary)
+		}
+	}
+
 	return nil
 }
 
@@ -723,6 +879,17 @@ func commitModel(commit git.Commit) commitPayload {
 	}
 }
 
+func storeCommitModel(commit store.Commit) commitPayload {
+	return commitPayload{
+		SHA:          commit.SHA,
+		Summary:      commit.Summary,
+		Message:      commit.Message,
+		Author:       commit.Author,
+		CommittedAt:  commit.CommittedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ChangedPaths: append([]string(nil), commit.ChangedPaths...),
+	}
+}
+
 func handoffModel(handoff store.Handoff) handoffPayload {
 	return handoffPayload{
 		ID:        store.HandoffRef(handoff.ID),
@@ -738,6 +905,14 @@ func branchSuffix(branch string) string {
 	}
 
 	return fmt.Sprintf(" [%s]", branch)
+}
+
+func branchSuffixValue(branch *string) string {
+	if branch == nil || *branch == "" {
+		return ""
+	}
+
+	return fmt.Sprintf(" [%s]", *branch)
 }
 
 func nullableString(value string) *string {

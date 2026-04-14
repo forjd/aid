@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"aid/internal/store"
 )
@@ -129,5 +130,31 @@ func TestStoreCRUDFlow(t *testing.T) {
 	}
 	if len(handoffs) != 1 || handoffs[0].ID != handoff.ID {
 		t.Fatalf("unexpected handoffs: %#v", handoffs)
+	}
+
+	indexedAt := time.Now().UTC()
+	if err := sqliteStore.ReplaceCommits(ctx, store.ReplaceCommitsInput{
+		RepoID:    repo.ID,
+		IndexedAt: indexedAt,
+		Commits: []store.Commit{
+			{
+				SHA:          "abc123",
+				Author:       "Dan",
+				CommittedAt:  indexedAt,
+				Message:      "feat: token refresh retry",
+				Summary:      "feat: token refresh retry",
+				ChangedPaths: []string{"auth.go"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace commits: %v", err)
+	}
+
+	commits, err := sqliteStore.SearchCommits(ctx, repo.ID, "refresh", 10)
+	if err != nil {
+		t.Fatalf("search commits: %v", err)
+	}
+	if len(commits) != 1 || commits[0].SHA != "abc123" {
+		t.Fatalf("unexpected commits: %#v", commits)
 	}
 }

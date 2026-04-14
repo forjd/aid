@@ -276,8 +276,8 @@ func rootCommand() *Command {
 			`aid history search "invoice VAT reconciliation"`,
 		},
 		Children: []*Command{
-			stubCommand("index", "aid history index", "index", "aid history index [options]", "Index git history for search"),
-			stubCommand("search", "aid history search", "search <query>", "aid history search <query> [options]", "Search indexed commit history"),
+			command("index", "aid history index", "index", "aid history index [options]", "Index git history for search", historyIndexCommand),
+			command("search", "aid history search", "search <query>", "aid history search <query> [options]", "Search indexed commit history", historySearchCommand),
 		},
 	}
 
@@ -298,7 +298,7 @@ func rootCommand() *Command {
 			command("init", "aid init", "init", "aid init [options]", "Initialise aid in the current repository", initCommand),
 			command("status", "aid status", "status", "aid status [options]", "Show repo memory status", statusCommand),
 			command("resume", "aid resume", "resume", "aid resume [options]", "Show a compact working summary", resumeCommand),
-			stubCommand("recall", "aid recall", "recall <query>", "aid recall <query> [options]", "Search notes, decisions, handoffs, and commits"),
+			command("recall", "aid recall", "recall <query>", "aid recall <query> [options]", "Search notes, decisions, handoffs, and commits", recallCommand),
 			note,
 			task,
 			decide,

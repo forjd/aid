@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"aid/internal/app"
 	"aid/internal/config"
@@ -12,6 +13,7 @@ import (
 	handoffpkg "aid/internal/handoff"
 	"aid/internal/output"
 	resumepkg "aid/internal/resume"
+	searchpkg "aid/internal/search"
 	"aid/internal/store"
 	sqlitestore "aid/internal/store/sqlite"
 )
@@ -371,6 +373,110 @@ func handoffListCommand(args []string, streams Streams) error {
 	}
 
 	return output.RenderHandoffs(streams.Out, streams.Options, handoffs)
+}
+
+func historyIndexCommand(args []string, streams Streams) error {
+	if len(args) > 0 {
+		return fmt.Errorf("history index does not accept arguments")
+	}
+
+	ctx := context.Background()
+	runtime, err := openInitializedRepo(ctx, streams)
+	if err != nil {
+		return err
+	}
+	defer runtime.close()
+
+	commits, err := git.Commits(runtime.env.RepoRoot, 0)
+	if err != nil {
+		return err
+	}
+
+	storeCommits := make([]store.Commit, 0, len(commits))
+	for _, commit := range commits {
+		storeCommits = append(storeCommits, store.Commit{
+			SHA:          commit.SHA,
+			Author:       commit.Author,
+			CommittedAt:  commit.CommittedAt,
+			Message:      commit.Message,
+			Summary:      commit.Summary,
+			ChangedPaths: append([]string(nil), commit.ChangedPaths...),
+		})
+	}
+
+	if err := runtime.store.ReplaceCommits(ctx, store.ReplaceCommitsInput{
+		RepoID:    runtime.repo.ID,
+		Commits:   storeCommits,
+		IndexedAt: time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+
+	return output.RenderHistoryIndexed(streams.Out, streams.Options, output.HistoryIndexResult{
+		Indexed: len(storeCommits),
+	})
+}
+
+func historySearchCommand(args []string, streams Streams) error {
+	query, err := joinArgs(args, "search query")
+	if err != nil {
+		return err
+	}
+
+	runtime, err := openInitializedRepo(context.Background(), streams)
+	if err != nil {
+		return err
+	}
+	defer runtime.close()
+
+	commits, err := runtime.store.SearchCommits(context.Background(), runtime.repo.ID, query, defaultListLimit)
+	if err != nil {
+		return err
+	}
+
+	return output.RenderHistorySearch(streams.Out, streams.Options, output.HistorySearchResult{
+		Query:   query,
+		Commits: commits,
+	})
+}
+
+func recallCommand(args []string, streams Streams) error {
+	query, err := joinArgs(args, "query")
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	runtime, err := openInitializedRepo(ctx, streams)
+	if err != nil {
+		return err
+	}
+	defer runtime.close()
+
+	notes, err := runtime.store.ListNotes(ctx, runtime.repo.ID, 100)
+	if err != nil {
+		return err
+	}
+
+	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, 100)
+	if err != nil {
+		return err
+	}
+
+	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 20)
+	if err != nil {
+		return err
+	}
+
+	commits, err := runtime.store.SearchCommits(ctx, runtime.repo.ID, query, 10)
+	if err != nil {
+		return err
+	}
+
+	result := searchpkg.Build(query, runtime.env.Branch, notes, decisions, handoffs, commits)
+	return output.RenderRecall(streams.Out, streams.Options, output.RecallResult{
+		Result: result,
+	})
 }
 
 func openStore(ctx context.Context, streams Streams) (app.Environment, *sqlitestore.Store, error) {

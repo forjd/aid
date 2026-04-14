@@ -65,21 +65,27 @@ func TestSubcommandHelp(t *testing.T) {
 }
 
 func TestLeafCommandAllowsHelpAsArgument(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
 
-	exitCode := Run([]string{"recall", "help"}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected success, got exit code %d", exitCode)
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
 	}
-
-	if stderr.Len() != 0 {
-		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
 
-	output := stdout.String()
-	if !strings.Contains(output, "aid recall is scaffolded but not implemented yet.") {
-		t.Fatalf("expected scaffold message, got %q", output)
+	_ = runCLI(t, "init")
+	output := runCLI(t, "recall", "help")
+	if !strings.Contains(output, "No matching context.") {
+		t.Fatalf("expected no matching context, got %q", output)
 	}
 }
 
@@ -388,6 +394,137 @@ func TestHandoffGenerateAndList(t *testing.T) {
 	}
 	if len(payload.Data.Handoffs) != 1 || !strings.Contains(payload.Data.Handoffs[0].Summary, "Worktree: dirty") {
 		t.Fatalf("unexpected handoffs: %#v", payload.Data.Handoffs)
+	}
+}
+
+func TestHistoryIndexAndSearch(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "auth.txt"), []byte("refresh\n"))
+	runGit(t, repoDir, "add", "auth.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: token refresh retry")
+	writeFile(t, filepath.Join(repoDir, "invoice.txt"), []byte("vat\n"))
+	runGit(t, repoDir, "add", "invoice.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "fix: invoice vat reconciliation")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+
+	indexOut := runCLI(t, "history", "index")
+	if !strings.Contains(indexOut, "Indexed 2 commits.") {
+		t.Fatalf("expected index output, got %q", indexOut)
+	}
+
+	briefSearch := runCLI(t, "history", "search", "invoice", "--brief")
+	if !strings.Contains(briefSearch, "invoice vat reconciliation") {
+		t.Fatalf("expected invoice search result, got %q", briefSearch)
+	}
+
+	jsonSearch := runCLI(t, "history", "search", "refresh", "--json")
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			Query   string `json:"query"`
+			Commits []struct {
+				Summary string   `json:"summary"`
+				Paths   []string `json:"changed_paths"`
+			} `json:"commits"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonSearch), &payload); err != nil {
+		t.Fatalf("unmarshal history search json: %v\n%s", err, jsonSearch)
+	}
+	if !payload.OK || payload.Command != "history search" || payload.Data.Query != "refresh" {
+		t.Fatalf("unexpected history search payload: %#v", payload)
+	}
+	if len(payload.Data.Commits) != 1 || payload.Data.Commits[0].Summary != "feat: token refresh retry" {
+		t.Fatalf("unexpected history search commits: %#v", payload.Data.Commits)
+	}
+}
+
+func TestRecallSearchesAcrossStoredContext(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "auth.txt"), []byte("refresh\n"))
+	runGit(t, repoDir, "add", "auth.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: token refresh retry")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "note", "add", "Refresh token bug occurs after 401 retry")
+	_ = runCLI(t, "decide", "add", "Treat refresh tokens as single-use")
+	_ = runCLI(t, "task", "add", "Fix refresh retry path")
+	_ = runCLI(t, "handoff", "generate")
+	_ = runCLI(t, "history", "index")
+
+	briefRecall := runCLI(t, "recall", "refresh", "--brief")
+	for _, want := range []string{
+		"Refresh token bug occurs after 401 retry",
+		"Treat refresh tokens as single-use",
+		"feat: token refresh retry",
+	} {
+		if !strings.Contains(briefRecall, want) {
+			t.Fatalf("expected recall output to contain %q\n\n%s", want, briefRecall)
+		}
+	}
+
+	jsonRecall := runCLI(t, "recall", "refresh", "--json")
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			Query string `json:"query"`
+			Notes []struct {
+				Text string `json:"text"`
+			} `json:"notes"`
+			Decisions []struct {
+				Text string `json:"text"`
+			} `json:"decisions"`
+			Handoffs []struct {
+				Summary string `json:"summary"`
+			} `json:"handoffs"`
+			Commits []struct {
+				Summary string `json:"summary"`
+			} `json:"commits"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonRecall), &payload); err != nil {
+		t.Fatalf("unmarshal recall json: %v\n%s", err, jsonRecall)
+	}
+	if !payload.OK || payload.Command != "recall" || payload.Data.Query != "refresh" {
+		t.Fatalf("unexpected recall payload: %#v", payload)
+	}
+	if len(payload.Data.Notes) == 0 || len(payload.Data.Decisions) == 0 || len(payload.Data.Handoffs) == 0 || len(payload.Data.Commits) == 0 {
+		t.Fatalf("expected recall results across categories: %#v", payload.Data)
 	}
 }
 

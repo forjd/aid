@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"aid/internal/store"
@@ -432,6 +433,82 @@ func (s *Store) ListHandoffs(ctx context.Context, repoID int64, limit int) ([]st
 	return handoffs, nil
 }
 
+func (s *Store) ReplaceCommits(ctx context.Context, input store.ReplaceCommitsInput) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin commit index transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM commits WHERE repo_id = ?`, input.RepoID); err != nil {
+		return fmt.Errorf("clear existing commits: %w", err)
+	}
+
+	statement, err := tx.PrepareContext(ctx, `
+		INSERT INTO commits (repo_id, sha, author, committed_at, message, changed_paths, summary, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare commit insert: %w", err)
+	}
+	defer statement.Close()
+
+	indexedAt := formatTime(input.IndexedAt)
+	for _, commit := range input.Commits {
+		if _, err := statement.ExecContext(
+			ctx,
+			input.RepoID,
+			commit.SHA,
+			commit.Author,
+			formatTime(commit.CommittedAt),
+			commit.Message,
+			strings.Join(commit.ChangedPaths, "\n"),
+			commit.Summary,
+			indexedAt,
+		); err != nil {
+			return fmt.Errorf("insert commit %s: %w", commit.SHA, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit commit index transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) SearchCommits(ctx context.Context, repoID int64, query string, limit int) ([]store.Commit, error) {
+	pattern := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, repo_id, sha, author, committed_at, message, changed_paths, summary, indexed_at
+		FROM commits
+		WHERE repo_id = ?
+		  AND LOWER(summary || ' ' || message || ' ' || changed_paths) LIKE ?
+		ORDER BY committed_at DESC, id DESC
+		LIMIT ?
+	`, repoID, pattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search commits: %w", err)
+	}
+	defer rows.Close()
+
+	var commits []store.Commit
+	for rows.Next() {
+		commit, err := scanCommit(rows)
+		if err != nil {
+			return nil, err
+		}
+		commits = append(commits, commit)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate commits: %w", err)
+	}
+
+	return commits, nil
+}
+
 func (s *Store) StatusCounts(ctx context.Context, repoID int64) (store.StatusCounts, error) {
 	var counts store.StatusCounts
 
@@ -634,6 +711,34 @@ func scanHandoff(row scanner) (store.Handoff, error) {
 	handoff.Branch = branch.String
 	handoff.CreatedAt = parseTime(createdAt)
 	return handoff, nil
+}
+
+func scanCommit(row scanner) (store.Commit, error) {
+	var commit store.Commit
+	var committedAt string
+	var changedPaths string
+	var indexedAt string
+
+	if err := row.Scan(
+		&commit.ID,
+		&commit.RepoID,
+		&commit.SHA,
+		&commit.Author,
+		&committedAt,
+		&commit.Message,
+		&changedPaths,
+		&commit.Summary,
+		&indexedAt,
+	); err != nil {
+		return store.Commit{}, fmt.Errorf("scan commit: %w", err)
+	}
+
+	commit.CommittedAt = parseTime(committedAt)
+	commit.IndexedAt = parseTime(indexedAt)
+	if strings.TrimSpace(changedPaths) != "" {
+		commit.ChangedPaths = strings.Split(changedPaths, "\n")
+	}
+	return commit, nil
 }
 
 func nowUTC() time.Time {

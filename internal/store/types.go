@@ -69,6 +69,18 @@ type Handoff struct {
 	CreatedAt time.Time
 }
 
+type Commit struct {
+	ID           int64
+	RepoID       int64
+	SHA          string
+	Author       string
+	CommittedAt  time.Time
+	Message      string
+	Summary      string
+	ChangedPaths []string
+	IndexedAt    time.Time
+}
+
 type TaskCounts struct {
 	Total      int `json:"total"`
 	Open       int `json:"open"`
@@ -111,6 +123,12 @@ type AddHandoffInput struct {
 	Summary string
 }
 
+type ReplaceCommitsInput struct {
+	RepoID    int64
+	Commits   []Commit
+	IndexedAt time.Time
+}
+
 type Store interface {
 	Close() error
 	Migrate(ctx context.Context) error
@@ -125,6 +143,8 @@ type Store interface {
 	ListDecisions(ctx context.Context, repoID int64, limit int) ([]Decision, error)
 	AddHandoff(ctx context.Context, input AddHandoffInput) (Handoff, error)
 	ListHandoffs(ctx context.Context, repoID int64, limit int) ([]Handoff, error)
+	ReplaceCommits(ctx context.Context, input ReplaceCommitsInput) error
+	SearchCommits(ctx context.Context, repoID int64, query string, limit int) ([]Commit, error)
 	StatusCounts(ctx context.Context, repoID int64) (StatusCounts, error)
 }
 

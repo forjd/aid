@@ -20,11 +20,17 @@ type Commit struct {
 }
 
 func RecentCommits(startDir string, limit int) ([]Commit, error) {
-	if limit <= 0 {
-		return nil, nil
-	}
+	return Commits(startDir, limit)
+}
 
-	cmd := exec.Command("git", "-C", startDir, "log", fmt.Sprintf("-%d", limit), "--format=%H%x1f%an%x1f%aI%x1f%s", "--name-only")
+func Commits(startDir string, limit int) ([]Commit, error) {
+	args := []string{"-C", startDir, "log", "--all"}
+	if limit > 0 {
+		args = append(args, fmt.Sprintf("-%d", limit))
+	}
+	args = append(args, "--format=%H%x1f%an%x1f%aI%x1f%s", "--name-only")
+
+	cmd := exec.Command("git", args...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -43,12 +49,20 @@ func RecentCommits(startDir string, limit int) ([]Commit, error) {
 		return nil, err
 	}
 
+	return parseCommits(output, limit)
+}
+
+func parseCommits(output []byte, limit int) ([]Commit, error) {
 	trimmed := strings.TrimSpace(string(output))
 	if trimmed == "" {
 		return nil, nil
 	}
 
-	commits := make([]Commit, 0, limit)
+	capHint := limit
+	if capHint <= 0 {
+		capHint = 32
+	}
+	commits := make([]Commit, 0, capHint)
 	var current *Commit
 
 	scanner := bufio.NewScanner(strings.NewReader(trimmed))

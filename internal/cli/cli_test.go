@@ -672,6 +672,66 @@ func TestHistoryIndexAndSearch(t *testing.T) {
 	}
 }
 
+func TestHistoryIndexKeepsRecentCommitOrderWhenTimestampsTie(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("hello\n"))
+	runGit(t, repoDir, "add", "README.md")
+	sameTime := "2026-01-02T03:04:05Z"
+	runGitWithIdentityEnv(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=" + sameTime,
+		"GIT_COMMITTER_DATE=" + sameTime,
+	}, "commit", "-m", "feat: initial repo memory support")
+	writeFile(t, filepath.Join(repoDir, "auth.txt"), []byte("refresh\n"))
+	runGit(t, repoDir, "add", "auth.txt")
+	runGitWithIdentityEnv(t, repoDir, []string{
+		"GIT_AUTHOR_DATE=" + sameTime,
+		"GIT_COMMITTER_DATE=" + sameTime,
+	}, "commit", "-m", "fix: tighten refresh retry handling")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "history", "index")
+
+	jsonResume := runCLI(t, "resume", "--json")
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			RecentCommits []struct {
+				Summary string `json:"summary"`
+			} `json:"recent_commits"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonResume), &payload); err != nil {
+		t.Fatalf("unmarshal resume json: %v\n%s", err, jsonResume)
+	}
+	if !payload.OK || payload.Command != "resume" {
+		t.Fatalf("unexpected resume payload: %#v", payload)
+	}
+	if len(payload.Data.RecentCommits) < 2 {
+		t.Fatalf("expected two recent commits, got %#v", payload.Data.RecentCommits)
+	}
+	if payload.Data.RecentCommits[0].Summary != "fix: tighten refresh retry handling" ||
+		payload.Data.RecentCommits[1].Summary != "feat: initial repo memory support" {
+		t.Fatalf("expected indexed commits to preserve git order, got %#v", payload.Data.RecentCommits)
+	}
+}
+
 func TestVerboseHistoryAndHandoffOutputs(t *testing.T) {
 	repoDir := t.TempDir()
 	dataDir := filepath.Join(t.TempDir(), "aid-data")
@@ -1203,6 +1263,19 @@ func runGitWithIdentity(t *testing.T, cwd string, args ...string) {
 
 	prefixed := append([]string{"-c", "user.name=Test User", "-c", "user.email=test@example.com"}, args...)
 	runGit(t, cwd, prefixed...)
+}
+
+func runGitWithIdentityEnv(t *testing.T, cwd string, env []string, args ...string) {
+	t.Helper()
+
+	prefixed := append([]string{"-c", "user.name=Test User", "-c", "user.email=test@example.com"}, args...)
+	cmd := exec.Command("git", prefixed...)
+	cmd.Dir = cwd
+	cmd.Env = append(os.Environ(), env...)
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v with env %v failed: %v\n%s", args, env, err, output)
+	}
 }
 
 func currentGitBranch(t *testing.T, cwd string) string {

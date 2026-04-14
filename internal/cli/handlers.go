@@ -448,10 +448,12 @@ func historyIndexCommand(args []string, streams Streams) error {
 	}
 
 	storeCommits := make([]store.Commit, 0, len(reachableSHAs))
-	for _, sha := range reachableSHAs {
+	totalReachable := len(reachableSHAs)
+	for index, sha := range reachableSHAs {
 		if existing, ok := existingBySHA[sha]; ok {
 			filtered, keep := filteredStoredCommit(existing, runtime.cfg.Indexing.IgnorePaths)
 			if keep {
+				filtered.GitOrder = totalReachable - index - 1
 				storeCommits = append(storeCommits, filtered)
 			}
 			continue
@@ -463,6 +465,7 @@ func historyIndexCommand(args []string, streams Streams) error {
 		}
 		filtered, keep := filteredGitCommit(commit, runtime.cfg.Indexing.IgnorePaths)
 		if keep {
+			filtered.GitOrder = totalReachable - index - 1
 			storeCommits = append(storeCommits, filtered)
 		}
 	}

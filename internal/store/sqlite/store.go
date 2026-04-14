@@ -20,7 +20,7 @@ type Store struct {
 	db *sql.DB
 }
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 var migrations = [][]string{
 	{
@@ -144,6 +144,22 @@ var migrations = [][]string{
 	},
 	{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_commits_repo_sha_unique ON commits(repo_id, sha)`,
+	},
+	{
+		`ALTER TABLE commits ADD COLUMN git_order INTEGER NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS idx_commits_repo_git_order ON commits(repo_id, git_order ASC)`,
+		`WITH ranked AS (
+			SELECT
+				id,
+				ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY committed_at ASC, id ASC) - 1 AS commit_rank
+			FROM commits
+		)
+		UPDATE commits
+		SET git_order = COALESCE((
+			SELECT commit_rank
+			FROM ranked
+			WHERE ranked.id = commits.id
+		), 0)`,
 	},
 }
 
@@ -558,10 +574,10 @@ func (s *Store) ListHandoffs(ctx context.Context, repoID int64, limit int) ([]st
 
 func (s *Store) ListCommits(ctx context.Context, repoID int64, limit int) ([]store.Commit, error) {
 	query := `
-		SELECT id, repo_id, sha, author, committed_at, message, changed_paths, summary, indexed_at
+		SELECT id, repo_id, sha, author, git_order, committed_at, message, changed_paths, summary, indexed_at
 		FROM commits
 		WHERE repo_id = ?
-		ORDER BY committed_at DESC, id DESC
+		ORDER BY committed_at DESC, git_order DESC, id DESC
 	`
 	args := []any{repoID}
 	if limit > 0 {
@@ -613,8 +629,8 @@ func (s *Store) SyncCommits(ctx context.Context, input store.SyncCommitsInput) (
 	}
 
 	insertStatement, err := tx.PrepareContext(ctx, `
-		INSERT INTO commits (repo_id, sha, author, committed_at, message, changed_paths, summary, indexed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO commits (repo_id, sha, author, git_order, committed_at, message, changed_paths, summary, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return store.SyncCommitsResult{}, fmt.Errorf("prepare commit insert: %w", err)
@@ -623,7 +639,7 @@ func (s *Store) SyncCommits(ctx context.Context, input store.SyncCommitsInput) (
 
 	updateStatement, err := tx.PrepareContext(ctx, `
 		UPDATE commits
-		SET author = ?, committed_at = ?, message = ?, changed_paths = ?, summary = ?, indexed_at = ?
+		SET author = ?, git_order = ?, committed_at = ?, message = ?, changed_paths = ?, summary = ?, indexed_at = ?
 		WHERE repo_id = ? AND sha = ?
 	`)
 	if err != nil {
@@ -660,6 +676,7 @@ func (s *Store) SyncCommits(ctx context.Context, input store.SyncCommitsInput) (
 			if _, err := updateStatement.ExecContext(
 				ctx,
 				commit.Author,
+				commit.GitOrder,
 				formatTime(commit.CommittedAt),
 				commit.Message,
 				strings.Join(commit.ChangedPaths, "\n"),
@@ -679,6 +696,7 @@ func (s *Store) SyncCommits(ctx context.Context, input store.SyncCommitsInput) (
 			input.RepoID,
 			commit.SHA,
 			commit.Author,
+			commit.GitOrder,
 			formatTime(commit.CommittedAt),
 			commit.Message,
 			strings.Join(commit.ChangedPaths, "\n"),
@@ -725,12 +743,12 @@ func (s *Store) SearchCommits(ctx context.Context, repoID int64, query string, l
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT c.id, c.repo_id, c.sha, c.author, c.committed_at, c.message, c.changed_paths, c.summary, c.indexed_at
+		SELECT c.id, c.repo_id, c.sha, c.author, c.git_order, c.committed_at, c.message, c.changed_paths, c.summary, c.indexed_at
 		FROM commits_fts
 		JOIN commits c ON c.id = commits_fts.commit_id
 		WHERE commits_fts.repo_id = ?
 		  AND commits_fts MATCH ?
-		ORDER BY bm25(commits_fts, 10.0, 5.0, 1.0, 20.0), c.committed_at DESC, c.id DESC
+		ORDER BY bm25(commits_fts, 10.0, 5.0, 1.0, 20.0), c.committed_at DESC, c.git_order DESC, c.id DESC
 		LIMIT ?
 	`, repoID, ftsQuery, limit)
 	if err != nil {
@@ -1221,6 +1239,7 @@ func scanCommit(row scanner) (store.Commit, error) {
 		&commit.RepoID,
 		&commit.SHA,
 		&commit.Author,
+		&commit.GitOrder,
 		&committedAt,
 		&commit.Message,
 		&changedPaths,
@@ -1252,7 +1271,7 @@ func currentSchemaVersion(ctx context.Context, q queryRower) (int, error) {
 
 func existingCommitsBySHA(ctx context.Context, tx *sql.Tx, repoID int64) (map[string]store.Commit, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, repo_id, sha, author, committed_at, message, changed_paths, summary, indexed_at
+		SELECT id, repo_id, sha, author, git_order, committed_at, message, changed_paths, summary, indexed_at
 		FROM commits
 		WHERE repo_id = ?
 	`, repoID)
@@ -1279,6 +1298,7 @@ func existingCommitsBySHA(ctx context.Context, tx *sql.Tx, repoID int64) (map[st
 
 func sameCommit(existing store.Commit, candidate store.Commit) bool {
 	if existing.Author != candidate.Author ||
+		existing.GitOrder != candidate.GitOrder ||
 		existing.Summary != candidate.Summary ||
 		existing.Message != candidate.Message ||
 		!existing.CommittedAt.Equal(candidate.CommittedAt) ||

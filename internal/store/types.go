@@ -74,6 +74,7 @@ type Commit struct {
 	RepoID       int64
 	SHA          string
 	Author       string
+	GitOrder     int
 	CommittedAt  time.Time
 	Message      string
 	Summary      string

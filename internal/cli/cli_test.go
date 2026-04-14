@@ -215,6 +215,92 @@ func TestStatusSupportsBriefAndJSON(t *testing.T) {
 	}
 }
 
+func TestVerboseStatusAndListOutputs(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to temp repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	initOut := runCLI(t, "init", "--verbose")
+	for _, want := range []string{
+		"Repo name:",
+		"Config created:",
+		"Next steps:",
+	} {
+		if !strings.Contains(initOut, want) {
+			t.Fatalf("expected verbose init output to contain %q\n\n%s", want, initOut)
+		}
+	}
+
+	_ = runCLI(t, "note", "add", "Token refresh bug")
+	_ = runCLI(t, "task", "add", "Fix token refresh")
+	_ = runCLI(t, "decide", "add", "Store money as integer pence")
+
+	defaultStatus := runCLI(t, "status")
+	if strings.Contains(defaultStatus, "Repo name:") {
+		t.Fatalf("expected default status output to stay compact, got %q", defaultStatus)
+	}
+
+	verboseStatus := runCLI(t, "status", "--verbose")
+	for _, want := range []string{
+		"Repo name:",
+		"Task breakdown:",
+		"Next steps:",
+	} {
+		if !strings.Contains(verboseStatus, want) {
+			t.Fatalf("expected verbose status output to contain %q\n\n%s", want, verboseStatus)
+		}
+	}
+
+	verboseNotes := runCLI(t, "note", "list", "--verbose")
+	for _, want := range []string{
+		"Note note_1",
+		"Scope: branch",
+		"Created:",
+		"Text: Token refresh bug",
+	} {
+		if !strings.Contains(verboseNotes, want) {
+			t.Fatalf("expected verbose notes output to contain %q\n\n%s", want, verboseNotes)
+		}
+	}
+
+	verboseTasks := runCLI(t, "task", "list", "--verbose")
+	for _, want := range []string{
+		"Task task_1",
+		"Status: open",
+		"Updated:",
+		"Text: Fix token refresh",
+	} {
+		if !strings.Contains(verboseTasks, want) {
+			t.Fatalf("expected verbose tasks output to contain %q\n\n%s", want, verboseTasks)
+		}
+	}
+
+	verboseDecisions := runCLI(t, "decide", "list", "--verbose")
+	for _, want := range []string{
+		"Decision decision_1",
+		"Created:",
+		"Text: Store money as integer pence",
+	} {
+		if !strings.Contains(verboseDecisions, want) {
+			t.Fatalf("expected verbose decisions output to contain %q\n\n%s", want, verboseDecisions)
+		}
+	}
+}
+
 func TestGlobalRepoFlagAndJSONListOutput(t *testing.T) {
 	repoDir := t.TempDir()
 	dataDir := filepath.Join(t.TempDir(), "aid-data")
@@ -330,6 +416,67 @@ func TestResumeOutputsWorkingSummary(t *testing.T) {
 	}
 	if len(payload.Data.RecentCommits) == 0 || payload.Data.RecentCommits[0].Summary != "feat: initial repo memory support" {
 		t.Fatalf("unexpected commits payload: %#v", payload.Data.RecentCommits)
+	}
+}
+
+func TestVerboseResumeAndRecallOutputs(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("hello\n"))
+	runGit(t, repoDir, "add", "README.md")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: initial refresh memory support")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "note", "add", "Token refresh bug occurs after 401 retry")
+	_ = runCLI(t, "task", "add", "Fix token refresh retry path")
+	_ = runCLI(t, "decide", "add", "Treat refresh tokens as single-use")
+	_ = runCLI(t, "handoff", "generate")
+	_ = runCLI(t, "history", "index")
+
+	defaultResume := runCLI(t, "resume")
+	if strings.Contains(defaultResume, "Active task inferred:") {
+		t.Fatalf("expected default resume output to stay compact, got %q", defaultResume)
+	}
+
+	verboseResume := runCLI(t, "resume", "--verbose")
+	for _, want := range []string{
+		"Repo name:",
+		"Active task inferred: yes",
+		"Task task_1",
+		"Created:",
+		"Author:",
+	} {
+		if !strings.Contains(verboseResume, want) {
+			t.Fatalf("expected verbose resume output to contain %q\n\n%s", want, verboseResume)
+		}
+	}
+
+	verboseRecall := runCLI(t, "recall", "refresh", "--verbose")
+	for _, want := range []string{
+		"Note note_1",
+		"Decision decision_1",
+		"Handoff handoff_1",
+		"Commit ",
+		"Created:",
+	} {
+		if !strings.Contains(verboseRecall, want) {
+			t.Fatalf("expected verbose recall output to contain %q\n\n%s", want, verboseRecall)
+		}
 	}
 }
 
@@ -459,6 +606,79 @@ func TestHistoryIndexAndSearch(t *testing.T) {
 	}
 	if len(payload.Data.Commits) != 1 || payload.Data.Commits[0].Summary != "feat: token refresh retry" {
 		t.Fatalf("unexpected history search commits: %#v", payload.Data.Commits)
+	}
+}
+
+func TestVerboseHistoryAndHandoffOutputs(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "auth.txt"), []byte("refresh\n"))
+	runGit(t, repoDir, "add", "auth.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: token refresh retry")
+	writeFile(t, filepath.Join(repoDir, "NOTES.txt"), []byte("dirty tree\n"))
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "task", "add", "Fix token refresh retry path")
+
+	verboseGenerated := runCLI(t, "handoff", "generate", "--verbose")
+	for _, want := range []string{
+		"Saved handoff handoff_1",
+		"Created:",
+		"Summary:",
+	} {
+		if !strings.Contains(verboseGenerated, want) {
+			t.Fatalf("expected verbose handoff generate output to contain %q\n\n%s", want, verboseGenerated)
+		}
+	}
+
+	verboseList := runCLI(t, "handoff", "list", "--verbose")
+	for _, want := range []string{
+		"Handoff handoff_1",
+		"Created:",
+		"Summary:",
+	} {
+		if !strings.Contains(verboseList, want) {
+			t.Fatalf("expected verbose handoff list output to contain %q\n\n%s", want, verboseList)
+		}
+	}
+
+	indexOut := runCLI(t, "history", "index", "--verbose")
+	for _, want := range []string{
+		"History index complete",
+		"Mode: full replacement",
+		"Commits indexed: 1",
+	} {
+		if !strings.Contains(indexOut, want) {
+			t.Fatalf("expected verbose history index output to contain %q\n\n%s", want, indexOut)
+		}
+	}
+
+	verboseSearch := runCLI(t, "history", "search", "refresh", "--verbose")
+	for _, want := range []string{
+		"Commit ",
+		"Author: Test User",
+		"Committed:",
+		"Message:",
+		"Paths: auth.txt",
+	} {
+		if !strings.Contains(verboseSearch, want) {
+			t.Fatalf("expected verbose history search output to contain %q\n\n%s", want, verboseSearch)
+		}
 	}
 }
 

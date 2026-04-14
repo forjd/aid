@@ -47,6 +47,7 @@ Working global flags:
 
 - `--json`
 - `--brief`
+- `--verbose`
 - `--repo`
 
 ## Done
@@ -64,13 +65,12 @@ Working global flags:
 - `aid history index` stores commit metadata in SQLite.
 - `aid history search` searches indexed commits with SQLite FTS ranking.
 - `aid recall` searches notes, decisions, handoffs, and indexed commits together, reusing commit search ranking.
-- Human-readable output, `--brief`, and `--json` are implemented for the working commands.
+- Human-readable output, `--brief`, `--verbose`, and `--json` are implemented for the working commands.
 - The repo includes a static skill package at [skills/aid/SKILL.md](../skills/aid/SKILL.md).
 - Tests cover the main end-to-end command flows.
 
 ## Partial
 
-- `--verbose` is parsed globally but does not yet have distinct richer renderers.
 - Recall ranking for notes, decisions, and handoffs is still basic branch-aware filtering; only commits use FTS relevance ranking.
 - Handoff summaries are useful, but still heuristic and fairly simple.
 - Repo config is created, but only lightly used after init.
@@ -81,7 +81,6 @@ Working global flags:
 - Optional embeddings / semantic search.
 - Incremental history indexing instead of replacing the full commit index each run.
 - Richer handoff generation with open questions and more deliberate next-step synthesis.
-- Distinct `--verbose` output mode.
 - Better schema migration/versioning strategy.
 - Any TUI, background daemon, cloud sync, or team collaboration work.
 
@@ -100,11 +99,10 @@ Working global flags:
 
 ## Recommended Next Work
 
-1. Make `--verbose` materially different from the default human-readable output.
-2. Improve `resume` and handoff ranking so active work and suggested next steps are more reliable.
-3. Extend search ranking beyond commits so notes, decisions, and handoffs get stronger relevance ordering.
-4. Move from full history reindexing to incremental indexing.
-5. Rename the Go module once the canonical repository path is known.
+1. Improve `resume` and handoff ranking so active work and suggested next steps are more reliable.
+2. Extend search ranking beyond commits so notes, decisions, and handoffs get stronger relevance ordering.
+3. Move from full history reindexing to incremental indexing.
+4. Rename the Go module once the canonical repository path is known.
 
 ## Open Notes
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"aid/internal/git"
 	resumepkg "aid/internal/resume"
@@ -130,6 +131,20 @@ func RenderInit(w io.Writer, opts Options, result InitResult) error {
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		fmt.Fprintf(w, "Initialised aid for repo %s\n", result.RepoName)
+		fmt.Fprintf(w, "Repo name: %s\n", result.RepoName)
+		fmt.Fprintf(w, "Repo path: %s\n", result.RepoPath)
+		fmt.Fprintf(w, "Branch: %s\n", result.Branch)
+		fmt.Fprintf(w, "Database: %s\n", result.DBPath)
+		fmt.Fprintf(w, "Config path: %s\n", result.ConfigPath)
+		fmt.Fprintf(w, "Config created: %s\n", yesNo(result.ConfigCreated))
+		fmt.Fprintln(w, "Next steps:")
+		fmt.Fprintln(w, "- aid status")
+		fmt.Fprintln(w, "- aid resume")
+		return nil
+	}
+
 	state := "existing"
 	if result.ConfigCreated {
 		state = "created"
@@ -200,6 +215,36 @@ func RenderStatus(w io.Writer, opts Options, result StatusResult) error {
 		} else {
 			fmt.Fprintln(w, "Next: run aid init")
 		}
+		return nil
+	}
+
+	if opts.IsVerbose() {
+		fmt.Fprintf(w, "Repo name: %s\n", result.RepoName)
+		fmt.Fprintf(w, "Repo path: %s\n", result.RepoPath)
+		fmt.Fprintf(w, "Branch: %s\n", result.Branch)
+		fmt.Fprintf(w, "Database: %s\n", result.DBPath)
+		fmt.Fprintf(w, "Config path: %s\n", result.ConfigPath)
+		fmt.Fprintf(w, "Config state: %s\n", configState(result.ConfigExists))
+
+		if !result.Initialized {
+			fmt.Fprintln(w, "Aid state: not initialised")
+			fmt.Fprintln(w, "Next steps:")
+			fmt.Fprintln(w, "- aid init")
+			return nil
+		}
+
+		fmt.Fprintln(w, "Aid state: initialised")
+		fmt.Fprintf(w, "Notes: %d\n", result.Counts.Notes)
+		fmt.Fprintf(w, "Decisions: %d\n", result.Counts.Decisions)
+		fmt.Fprintln(w, "Task breakdown:")
+		fmt.Fprintf(w, "- total: %d\n", result.Counts.Tasks.Total)
+		fmt.Fprintf(w, "- open: %d\n", result.Counts.Tasks.Open)
+		fmt.Fprintf(w, "- in_progress: %d\n", result.Counts.Tasks.InProgress)
+		fmt.Fprintf(w, "- blocked: %d\n", result.Counts.Tasks.Blocked)
+		fmt.Fprintf(w, "- done: %d\n", result.Counts.Tasks.Done)
+		fmt.Fprintln(w, "Next steps:")
+		fmt.Fprintln(w, "- aid resume")
+		fmt.Fprintln(w, "- aid handoff generate")
 		return nil
 	}
 
@@ -294,6 +339,60 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 		})
 	}
 
+	if opts.IsVerbose() {
+		fmt.Fprintf(w, "Repo name: %s\n", result.RepoName)
+		fmt.Fprintf(w, "Repo path: %s\n", result.RepoPath)
+		fmt.Fprintf(w, "Branch: %s\n", result.Branch)
+		fmt.Fprintf(w, "Active task inferred: %s\n", yesNo(result.Bundle.ActiveTaskInferred))
+		fmt.Fprintf(w, "Active task ambiguous: %s\n", yesNo(result.Bundle.ActiveTaskAmbiguous))
+
+		if result.Bundle.ActiveTask != nil {
+			fmt.Fprintln(w, "Active task:")
+			writeVerboseTask(w, taskModel(*result.Bundle.ActiveTask))
+		}
+
+		if len(result.Bundle.Notes) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Notes:")
+			for i, note := range result.Bundle.Notes {
+				if i > 0 {
+					fmt.Fprintln(w)
+				}
+				writeVerboseNote(w, noteModel(note))
+			}
+		}
+
+		if len(result.Bundle.Decisions) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Decisions:")
+			for i, decision := range result.Bundle.Decisions {
+				if i > 0 {
+					fmt.Fprintln(w)
+				}
+				writeVerboseDecision(w, decisionModel(decision))
+			}
+		}
+
+		if len(result.Bundle.RecentCommits) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Recent commits:")
+			for i, commit := range result.Bundle.RecentCommits {
+				if i > 0 {
+					fmt.Fprintln(w)
+				}
+				writeVerboseCommit(w, commitModel(commit))
+			}
+		}
+
+		if result.Bundle.NextAction != nil {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Next action:")
+			fmt.Fprintf(w, "- %s\n", *result.Bundle.NextAction)
+		}
+
+		return nil
+	}
+
 	fmt.Fprintf(w, "Branch: %s\n", result.Branch)
 	if result.Bundle.ActiveTask != nil {
 		fmt.Fprintf(w, "Task: %s\n", result.Bundle.ActiveTask.Text)
@@ -358,6 +457,14 @@ func RenderHandoffGenerated(w io.Writer, opts Options, result HandoffGenerateRes
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		fmt.Fprintf(w, "Saved handoff %s%s\n", store.HandoffRef(result.Handoff.ID), branchSuffix(result.Handoff.Branch))
+		fmt.Fprintf(w, "Created: %s\n", formatTimestamp(result.Handoff.CreatedAt))
+		fmt.Fprintln(w, "Summary:")
+		writeIndentedText(w, result.Handoff.Summary)
+		return nil
+	}
+
 	fmt.Fprintf(w, "Saved handoff %s%s\n", store.HandoffRef(result.Handoff.ID), branchSuffix(result.Handoff.Branch))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, result.Handoff.Summary)
@@ -396,6 +503,16 @@ func RenderHandoffs(w io.Writer, opts Options, handoffs []store.Handoff) error {
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		for i, handoff := range handoffs {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			writeVerboseHandoff(w, handoffModel(handoff))
+		}
+		return nil
+	}
+
 	fmt.Fprintln(w, "Handoffs:")
 	for _, handoff := range handoffs {
 		fmt.Fprintf(w, "- %s%s %s\n", store.HandoffRef(handoff.ID), branchSuffix(handoff.Branch), previewLine(handoff.Summary))
@@ -416,6 +533,13 @@ func RenderHistoryIndexed(w io.Writer, opts Options, result HistoryIndexResult) 
 			},
 			Error: nil,
 		})
+	}
+
+	if opts.IsVerbose() {
+		fmt.Fprintln(w, "History index complete")
+		fmt.Fprintf(w, "Commits indexed: %d\n", result.Indexed)
+		fmt.Fprintln(w, "Mode: full replacement")
+		return nil
 	}
 
 	fmt.Fprintf(w, "Indexed %d commits.\n", result.Indexed)
@@ -452,6 +576,16 @@ func RenderHistorySearch(w io.Writer, opts Options, result HistorySearchResult) 
 	if opts.IsBrief() {
 		for _, commit := range items {
 			fmt.Fprintf(w, "%s %s\n", shortSHA(commit.SHA), commit.Summary)
+		}
+		return nil
+	}
+
+	if opts.IsVerbose() {
+		for i, commit := range items {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			writeVerboseCommit(w, commit)
 		}
 		return nil
 	}
@@ -514,6 +648,62 @@ func RenderRecall(w io.Writer, opts Options, result RecallResult) error {
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		if len(notes) > 0 {
+			fmt.Fprintln(w, "Notes:")
+			for i, note := range notes {
+				if i > 0 {
+					fmt.Fprintln(w)
+				}
+				writeVerboseNote(w, note)
+			}
+		}
+
+		if len(decisions) > 0 {
+			if len(notes) > 0 {
+				fmt.Fprintln(w)
+				fmt.Fprintln(w)
+			}
+			fmt.Fprintln(w, "Decisions:")
+			for i, decision := range decisions {
+				if i > 0 {
+					fmt.Fprintln(w)
+				}
+				writeVerboseDecision(w, decision)
+			}
+		}
+
+		if len(handoffs) > 0 {
+			if len(notes) > 0 || len(decisions) > 0 {
+				fmt.Fprintln(w)
+				fmt.Fprintln(w)
+			}
+			fmt.Fprintln(w, "Handoffs:")
+			for i, handoff := range handoffs {
+				if i > 0 {
+					fmt.Fprintln(w)
+				}
+				writeVerboseHandoff(w, handoff)
+			}
+		}
+
+		if len(commits) > 0 {
+			if len(notes) > 0 || len(decisions) > 0 || len(handoffs) > 0 {
+				fmt.Fprintln(w)
+				fmt.Fprintln(w)
+			}
+			fmt.Fprintln(w, "Commits:")
+			for i, commit := range commits {
+				if i > 0 {
+					fmt.Fprintln(w)
+				}
+				writeVerboseCommit(w, commit)
+			}
+		}
+
+		return nil
+	}
+
 	if len(notes) > 0 {
 		fmt.Fprintln(w, "Notes:")
 		for _, note := range notes {
@@ -565,6 +755,11 @@ func RenderNoteAdded(w io.Writer, opts Options, note store.Note) error {
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		writeVerboseNote(w, noteModel(note))
+		return nil
+	}
+
 	fmt.Fprintf(w, "Added note %s%s: %s\n", store.NoteRef(note.ID), branchSuffix(note.Branch), note.Text)
 	return nil
 }
@@ -601,6 +796,16 @@ func RenderNotes(w io.Writer, opts Options, notes []store.Note) error {
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		for i, note := range notes {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			writeVerboseNote(w, noteModel(note))
+		}
+		return nil
+	}
+
 	fmt.Fprintln(w, "Notes:")
 	for _, note := range notes {
 		fmt.Fprintf(w, "- %s%s %s\n", store.NoteRef(note.ID), branchSuffix(note.Branch), note.Text)
@@ -625,6 +830,11 @@ func RenderTaskAdded(w io.Writer, opts Options, task store.Task) error {
 
 	if opts.IsBrief() {
 		fmt.Fprintf(w, "%s [%s]%s %s\n", store.TaskRef(task.ID), task.Status, branchSuffix(task.Branch), task.Text)
+		return nil
+	}
+
+	if opts.IsVerbose() {
+		writeVerboseTask(w, taskModel(task))
 		return nil
 	}
 
@@ -664,6 +874,16 @@ func RenderTasks(w io.Writer, opts Options, tasks []store.Task) error {
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		for i, task := range tasks {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			writeVerboseTask(w, taskModel(task))
+		}
+		return nil
+	}
+
 	fmt.Fprintln(w, "Tasks:")
 	for _, task := range tasks {
 		fmt.Fprintf(w, "- %s [%s]%s %s\n", store.TaskRef(task.ID), task.Status, branchSuffix(task.Branch), task.Text)
@@ -691,6 +911,11 @@ func RenderTaskCompleted(w io.Writer, opts Options, task store.Task) error {
 		return nil
 	}
 
+	if opts.IsVerbose() {
+		writeVerboseTask(w, taskModel(task))
+		return nil
+	}
+
 	fmt.Fprintf(w, "Completed task %s%s: %s\n", store.TaskRef(task.ID), branchSuffix(task.Branch), task.Text)
 	return nil
 }
@@ -712,6 +937,11 @@ func RenderDecisionAdded(w io.Writer, opts Options, decision store.Decision) err
 
 	if opts.IsBrief() {
 		fmt.Fprintf(w, "%s%s %s\n", store.DecisionRef(decision.ID), branchSuffix(decision.Branch), decision.Text)
+		return nil
+	}
+
+	if opts.IsVerbose() {
+		writeVerboseDecision(w, decisionModel(decision))
 		return nil
 	}
 
@@ -747,6 +977,16 @@ func RenderDecisions(w io.Writer, opts Options, decisions []store.Decision) erro
 	if opts.IsBrief() {
 		for _, decision := range decisions {
 			fmt.Fprintf(w, "%s%s %s\n", store.DecisionRef(decision.ID), branchSuffix(decision.Branch), decision.Text)
+		}
+		return nil
+	}
+
+	if opts.IsVerbose() {
+		for i, decision := range decisions {
+			if i > 0 {
+				fmt.Fprintln(w)
+			}
+			writeVerboseDecision(w, decisionModel(decision))
 		}
 		return nil
 	}
@@ -941,4 +1181,92 @@ func previewLine(value string) string {
 	}
 
 	return ""
+}
+
+func writeVerboseNote(w io.Writer, note notePayload) {
+	fmt.Fprintf(w, "Note %s\n", note.ID)
+	fmt.Fprintf(w, "Branch: %s\n", verboseBranch(note.Branch))
+	fmt.Fprintf(w, "Scope: %s\n", note.Scope)
+	fmt.Fprintf(w, "Created: %s\n", note.CreatedAt)
+	fmt.Fprintf(w, "Text: %s\n", note.Text)
+}
+
+func writeVerboseTask(w io.Writer, task taskPayload) {
+	fmt.Fprintf(w, "Task %s\n", task.ID)
+	fmt.Fprintf(w, "Status: %s\n", task.Status)
+	fmt.Fprintf(w, "Branch: %s\n", verboseBranch(task.Branch))
+	fmt.Fprintf(w, "Scope: %s\n", task.Scope)
+	fmt.Fprintf(w, "Created: %s\n", task.CreatedAt)
+	fmt.Fprintf(w, "Updated: %s\n", task.UpdatedAt)
+	fmt.Fprintf(w, "Text: %s\n", task.Text)
+}
+
+func writeVerboseDecision(w io.Writer, decision decisionPayload) {
+	fmt.Fprintf(w, "Decision %s\n", decision.ID)
+	fmt.Fprintf(w, "Branch: %s\n", verboseBranch(decision.Branch))
+	fmt.Fprintf(w, "Created: %s\n", decision.CreatedAt)
+	fmt.Fprintf(w, "Text: %s\n", decision.Text)
+	if decision.Rationale != nil && strings.TrimSpace(*decision.Rationale) != "" {
+		fmt.Fprintf(w, "Rationale: %s\n", *decision.Rationale)
+	}
+}
+
+func writeVerboseHandoff(w io.Writer, handoff handoffPayload) {
+	fmt.Fprintf(w, "Handoff %s\n", handoff.ID)
+	fmt.Fprintf(w, "Branch: %s\n", verboseBranch(handoff.Branch))
+	fmt.Fprintf(w, "Created: %s\n", handoff.CreatedAt)
+	fmt.Fprintln(w, "Summary:")
+	writeIndentedText(w, handoff.Summary)
+}
+
+func writeVerboseCommit(w io.Writer, commit commitPayload) {
+	fmt.Fprintf(w, "Commit %s\n", shortSHA(commit.SHA))
+	fmt.Fprintf(w, "Summary: %s\n", commit.Summary)
+	fmt.Fprintf(w, "Author: %s\n", commit.Author)
+	fmt.Fprintf(w, "Committed: %s\n", commit.CommittedAt)
+	if len(commit.ChangedPaths) > 0 {
+		fmt.Fprintf(w, "Paths: %s\n", strings.Join(commit.ChangedPaths, ", "))
+	}
+	if strings.TrimSpace(commit.Message) != "" {
+		fmt.Fprintln(w, "Message:")
+		writeIndentedText(w, commit.Message)
+	}
+}
+
+func writeIndentedText(w io.Writer, value string) {
+	for _, line := range strings.Split(strings.TrimSpace(value), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fmt.Fprintf(w, "  %s\n", line)
+	}
+}
+
+func verboseBranch(branch *string) string {
+	if branch == nil || strings.TrimSpace(*branch) == "" {
+		return "repo"
+	}
+
+	return *branch
+}
+
+func configState(exists bool) string {
+	if exists {
+		return "present"
+	}
+
+	return "missing"
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+
+	return "no"
+}
+
+func formatTimestamp(value time.Time) string {
+	return value.Format("2006-01-02T15:04:05Z07:00")
 }

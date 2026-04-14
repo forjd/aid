@@ -38,12 +38,44 @@ Agents are good at short bursts of execution and weak at continuity. They forget
 
 ## Quickstart
 
-### Requirements
+### Install a pre-built binary
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/forjd/aid/main/scripts/install.sh | sh
+```
+
+Install into a custom directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/forjd/aid/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+```
+
+Install a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/forjd/aid/main/scripts/install.sh | sh -s -- -v v0.1.0
+```
+
+The installer downloads the matching GitHub Release asset, verifies it against `checksums.txt`, and installs `aid` into `~/.local/bin` by default.
+
+If you prefer a manual install, download the right asset from GitHub Releases:
+
+- `aid_linux_amd64.tar.gz`
+- `aid_linux_arm64.tar.gz`
+- `aid_darwin_amd64.tar.gz`
+- `aid_darwin_arm64.tar.gz`
+- `aid_windows_amd64.zip`
+
+Windows users should download `aid_windows_amd64.zip`, extract `aid.exe`, and place it somewhere on `PATH`.
+
+### Build from source
+
+Requirements:
 
 - Go 1.26+
 - A Git repository to work in
-
-### Build
 
 ```bash
 make build

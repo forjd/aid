@@ -27,6 +27,7 @@ archives:
   - id: aid
     ids:
       - aid
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
     format_overrides:

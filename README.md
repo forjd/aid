@@ -104,6 +104,16 @@ skills/aid/             static skill package for compatible agents
 
 The module path now matches the canonical repository path: `github.com/forjd/aid`.
 
+## Releases
+
+Releases are intended to be automated from `main`.
+
+- Commits merged to `main` drive `release-please`, which opens or updates a release PR and maintains `CHANGELOG.md`.
+- Merging the release PR creates the SemVer tag and GitHub Release.
+- A tag-triggered GoReleaser workflow publishes `aid` binaries for Linux, macOS, and Windows plus `checksums.txt`.
+
+This setup depends on a repository secret named `RELEASE_PLEASE_TOKEN`. Using the default `GITHUB_TOKEN` for release creation would prevent the follow-on tag workflow from running.
+
 ## Documentation
 
 - [MVP status](docs/mvp-status.md) for the current implementation tracker
@@ -120,5 +130,7 @@ make fmt
 make test
 go run ./cmd/aid --help
 ```
+
+If you are maintaining release automation, also enable "Allow GitHub Actions to create and approve pull requests" in the repository Actions settings.
 
 If you are picking up implementation work, start with [docs/mvp-status.md](docs/mvp-status.md).

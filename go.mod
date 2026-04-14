@@ -1,4 +1,4 @@
-module aid
+module github.com/forjd/aid
 
 go 1.26
 

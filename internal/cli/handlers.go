@@ -7,21 +7,22 @@ import (
 	"strings"
 	"time"
 
-	"aid/internal/app"
-	"aid/internal/config"
-	"aid/internal/git"
-	handoffpkg "aid/internal/handoff"
-	"aid/internal/output"
-	resumepkg "aid/internal/resume"
-	searchpkg "aid/internal/search"
-	"aid/internal/store"
-	sqlitestore "aid/internal/store/sqlite"
+	"github.com/forjd/aid/internal/app"
+	"github.com/forjd/aid/internal/config"
+	"github.com/forjd/aid/internal/git"
+	handoffpkg "github.com/forjd/aid/internal/handoff"
+	"github.com/forjd/aid/internal/output"
+	resumepkg "github.com/forjd/aid/internal/resume"
+	searchpkg "github.com/forjd/aid/internal/search"
+	"github.com/forjd/aid/internal/store"
+	sqlitestore "github.com/forjd/aid/internal/store/sqlite"
 )
 
 const defaultListLimit = 20
 
 type repoRuntime struct {
 	env   app.Environment
+	cfg   config.RepoConfig
 	store *sqlitestore.Store
 	repo  *store.Repo
 }
@@ -293,7 +294,18 @@ func resumeCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits)
+	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 1)
+	if err != nil {
+		return err
+	}
+
+	var latestHandoff *store.Handoff
+	if len(handoffs) > 0 {
+		latest := handoffs[0]
+		latestHandoff = &latest
+	}
+
+	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits, latestHandoff)
 	return output.RenderResume(streams.Out, streams.Options, output.ResumeResult{
 		RepoName: runtime.env.RepoName,
 		RepoPath: runtime.env.RepoRoot,
@@ -339,7 +351,7 @@ func handoffGenerateCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits)
+	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits, nil)
 	snapshot := handoffpkg.Build(runtime.env.Branch, worktree, bundle, tasks)
 
 	handoff, err := runtime.store.AddHandoff(ctx, store.AddHandoffInput{
@@ -393,7 +405,7 @@ func historyIndexCommand(args []string, streams Streams) error {
 	}
 
 	storeCommits := make([]store.Commit, 0, len(commits))
-	for _, commit := range commits {
+	for _, commit := range filterIndexedCommits(commits, runtime.cfg.Indexing.IgnorePaths) {
 		storeCommits = append(storeCommits, store.Commit{
 			SHA:          commit.SHA,
 			Author:       commit.Author,
@@ -404,16 +416,21 @@ func historyIndexCommand(args []string, streams Streams) error {
 		})
 	}
 
-	if err := runtime.store.ReplaceCommits(ctx, store.ReplaceCommitsInput{
+	result, err := runtime.store.SyncCommits(ctx, store.SyncCommitsInput{
 		RepoID:    runtime.repo.ID,
 		Commits:   storeCommits,
 		IndexedAt: time.Now().UTC(),
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
 	return output.RenderHistoryIndexed(streams.Out, streams.Options, output.HistoryIndexResult{
 		Indexed: len(storeCommits),
+		Added:   result.Added,
+		Updated: result.Updated,
+		Removed: result.Removed,
+		Mode:    historyIndexMode(result.Initial),
 	})
 }
 
@@ -453,17 +470,17 @@ func recallCommand(args []string, streams Streams) error {
 	}
 	defer runtime.close()
 
-	notes, err := runtime.store.ListNotes(ctx, runtime.repo.ID, 100)
+	notes, err := runtime.store.SearchNotes(ctx, runtime.repo.ID, runtime.env.Branch, query, 10)
 	if err != nil {
 		return err
 	}
 
-	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, 100)
+	decisions, err := runtime.store.SearchDecisions(ctx, runtime.repo.ID, runtime.env.Branch, query, 10)
 	if err != nil {
 		return err
 	}
 
-	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 20)
+	handoffs, err := runtime.store.SearchHandoffs(ctx, runtime.repo.ID, runtime.env.Branch, query, 10)
 	if err != nil {
 		return err
 	}
@@ -514,8 +531,15 @@ func openInitializedRepo(ctx context.Context, streams Streams) (*repoRuntime, er
 		return nil, fmt.Errorf("repo not initialised; run \"aid init\" first")
 	}
 
+	cfg, err := config.LoadRepoConfig(env.RepoConfigPath)
+	if err != nil {
+		_ = sqliteStore.Close()
+		return nil, err
+	}
+
 	return &repoRuntime{
 		env:   env,
+		cfg:   cfg,
 		store: sqliteStore,
 		repo:  repo,
 	}, nil
@@ -532,4 +556,52 @@ func joinArgs(args []string, label string) (string, error) {
 	}
 
 	return text, nil
+}
+
+func filterIndexedCommits(commits []git.Commit, ignorePaths []string) []git.Commit {
+	if len(ignorePaths) == 0 {
+		return commits
+	}
+
+	filtered := make([]git.Commit, 0, len(commits))
+	for _, commit := range commits {
+		paths := filterChangedPaths(commit.ChangedPaths, ignorePaths)
+		if len(commit.ChangedPaths) > 0 && len(paths) == 0 {
+			continue
+		}
+
+		commit.ChangedPaths = paths
+		filtered = append(filtered, commit)
+	}
+
+	return filtered
+}
+
+func filterChangedPaths(paths []string, ignorePaths []string) []string {
+	filtered := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if matchesIgnoredPath(path, ignorePaths) {
+			continue
+		}
+		filtered = append(filtered, path)
+	}
+	return filtered
+}
+
+func matchesIgnoredPath(path string, ignorePaths []string) bool {
+	normalizedPath := strings.TrimPrefix(strings.ReplaceAll(path, "\\", "/"), "./")
+	for _, prefix := range ignorePaths {
+		normalizedPrefix := strings.TrimPrefix(strings.ReplaceAll(prefix, "\\", "/"), "./")
+		if normalizedPrefix != "" && strings.HasPrefix(normalizedPath, normalizedPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func historyIndexMode(initial bool) string {
+	if initial {
+		return "initial sync"
+	}
+	return "incremental sync"
 }

@@ -3,8 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
-	"aid/internal/output"
+	"github.com/forjd/aid/internal/app"
+	"github.com/forjd/aid/internal/config"
+	"github.com/forjd/aid/internal/output"
 )
 
 type Streams struct {
@@ -27,6 +30,16 @@ type Command struct {
 
 func Run(args []string, stdout, stderr io.Writer) int {
 	options, filteredArgs, err := parseGlobalOptions(args)
+	if err != nil {
+		if options.IsJSON() {
+			_ = output.WriteError(stdout, inferCommandPath(rootCommand(), filteredArgs), err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	options, err = applyConfiguredDefaults(options, filteredArgs)
 	if err != nil {
 		if options.IsJSON() {
 			_ = output.WriteError(stdout, inferCommandPath(rootCommand(), filteredArgs), err)
@@ -344,6 +357,55 @@ func parseGlobalOptions(args []string) (output.Options, []string, error) {
 	}
 
 	return opts, filtered, nil
+}
+
+func applyConfiguredDefaults(opts output.Options, filteredArgs []string) (output.Options, error) {
+	if opts.Format != output.FormatHuman || isHelpRequest(filteredArgs) {
+		return opts, nil
+	}
+
+	env, err := app.Discover(opts.RepoPath)
+	if err != nil {
+		return opts, nil
+	}
+
+	cfg, err := config.LoadRepoConfig(env.RepoConfigPath)
+	if err != nil {
+		return opts, err
+	}
+
+	switch strings.ToLower(strings.TrimSpace(cfg.Output.DefaultMode)) {
+	case "", "human":
+		return opts, nil
+	case "brief":
+		opts.Format = output.FormatBrief
+	case "verbose":
+		opts.Format = output.FormatVerbose
+	case "json":
+		opts.Format = output.FormatJSON
+	default:
+		return opts, fmt.Errorf("invalid output.default_mode %q", cfg.Output.DefaultMode)
+	}
+
+	return opts, nil
+}
+
+func isHelpRequest(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+
+	if isHelpFlag(args[0]) || args[0] == "help" {
+		return true
+	}
+
+	for _, arg := range args {
+		if isHelpFlag(arg) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func stubCommand(name, path, use, usage, summary string) *Command {

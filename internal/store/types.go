@@ -129,6 +129,20 @@ type ReplaceCommitsInput struct {
 	IndexedAt time.Time
 }
 
+type SyncCommitsInput struct {
+	RepoID    int64
+	Commits   []Commit
+	IndexedAt time.Time
+}
+
+type SyncCommitsResult struct {
+	Added   int
+	Updated int
+	Removed int
+	Total   int
+	Initial bool
+}
+
 type Store interface {
 	Close() error
 	Migrate(ctx context.Context) error
@@ -144,7 +158,11 @@ type Store interface {
 	AddHandoff(ctx context.Context, input AddHandoffInput) (Handoff, error)
 	ListHandoffs(ctx context.Context, repoID int64, limit int) ([]Handoff, error)
 	ReplaceCommits(ctx context.Context, input ReplaceCommitsInput) error
+	SyncCommits(ctx context.Context, input SyncCommitsInput) (SyncCommitsResult, error)
 	SearchCommits(ctx context.Context, repoID int64, query string, limit int) ([]Commit, error)
+	SearchNotes(ctx context.Context, repoID int64, branch string, query string, limit int) ([]Note, error)
+	SearchDecisions(ctx context.Context, repoID int64, branch string, query string, limit int) ([]Decision, error)
+	SearchHandoffs(ctx context.Context, repoID int64, branch string, query string, limit int) ([]Handoff, error)
 	StatusCounts(ctx context.Context, repoID int64) (StatusCounts, error)
 }
 

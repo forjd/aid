@@ -1,93 +1,124 @@
-# aid
+<div align="center">
+  <h1>aid</h1>
+  <p><strong>Local memory for coding agents and developers working inside Git repositories.</strong></p>
+  <p>Capture notes, tasks, decisions, handoffs, and indexed commit history in a small Go CLI backed by SQLite.</p>
+  <p>
+    <code>local-first</code>
+    <code>go</code>
+    <code>sqlite</code>
+    <code>git-aware</code>
+    <code>agent-friendly</code>
+  </p>
+</div>
 
-`aid` is a local memory CLI for coding agents and developers working inside Git repositories.
+`aid` is a local-first command-line tool for preserving working context inside a repo. It gives humans and coding agents a lightweight memory layer that survives across sessions, stays close to the codebase, and can be queried without rebuilding context from scratch every time.
 
-It is being built in Go as a small, cross-platform tool with SQLite-backed local storage, strong help output, and predictable human and machine-readable command surfaces.
+## Why `aid`
 
-## Status
+Agents are good at short bursts of execution and weak at continuity. They forget why a change was made, which task is still active, what a previous session learned, and which commits matter. `aid` exists to make repo work more resumable, more searchable, and less wasteful on tokens.
 
-This repository now has a Go-first scaffold:
+## Highlights
 
-- a compilable CLI entrypoint
-- a command tree and help surface
-- global `--brief`, `--json`, and `--repo` flag handling
-- SQLite-backed `init`, `note`, `task`, and `decide` commands
-- a real `status` command
-- a real `resume` command with active-task inference and recent commit summaries
-- explicit `handoff generate` and `handoff list` support backed by SQLite
-- `history index` and `history search` backed by the local commit index
-- `recall` across notes, decisions, handoffs, and indexed commits
-- package boundaries for storage, Git, search, resume, handoff, and output
-- a static skill package location for agents
+- Local-first storage with SQLite; no hosted service required.
+- Built for real Git repositories, not a separate knowledge base.
+- Predictable human-readable and machine-readable CLI output.
+- Small, cross-platform Go binary with minimal runtime assumptions.
+- Focused on continuity: notes, tasks, decisions, handoffs, and recall.
 
-The repository is still early, but the core local-memory workflow is now usable end to end.
+## Current Capabilities
 
-## Why Go
+| Area | Commands | What it covers |
+| --- | --- | --- |
+| Repo setup | `aid init`, `aid status` | Initialize repo state and inspect current memory health. |
+| Working memory | `aid note`, `aid task`, `aid decide` | Record findings, active work, and engineering decisions. |
+| Session continuity | `aid resume`, `aid handoff generate`, `aid handoff list` | Build compact summaries and persist handoffs between sessions. |
+| Recall | `aid recall <query>` | Search notes, decisions, handoffs, and indexed commits together. |
+| Git history | `aid history index`, `aid history search <query>` | Index and search local commit history with SQLite-backed retrieval. |
+| Output modes | `--brief`, `--json`, `--verbose`, `--repo` | Support humans, scripts, and agent workflows. |
 
-Go is the right fit for `aid` because it keeps distribution and runtime simple:
+## Quickstart
 
-- single-binary delivery
-- straightforward filesystem and subprocess work
-- predictable cross-platform behaviour
-- good fit for SQLite-backed local tools
-- aligned with the project's "boring technology" constraint
+### Requirements
+
+- Go 1.26+
+- A Git repository to work in
+
+### Build
+
+```bash
+make build
+./bin/aid --help
+```
+
+If you prefer to run without building a binary first:
+
+```bash
+go run ./cmd/aid --help
+```
+
+### Initialize and use it
+
+```bash
+./bin/aid init
+./bin/aid status --brief
+./bin/aid note add "Refresh token bug occurs after 401 retry"
+./bin/aid task add "Tighten retry handling for expired sessions"
+./bin/aid decide add "Store money as integer pence to avoid float drift"
+./bin/aid history index
+./bin/aid recall "refresh token"
+./bin/aid resume --brief
+./bin/aid handoff generate --brief
+```
+
+## Typical Workflow
+
+1. Start a session with `aid resume --brief`.
+2. Record only high-signal findings with `aid note add`.
+3. Track meaningful units of work with `aid task add` and `aid task done`.
+4. Save non-obvious engineering decisions with `aid decide add`.
+5. Reindex and search commit history when Git context matters.
+6. End with `aid handoff generate --brief`.
 
 ## Repository Layout
 
 ```text
-cmd/aid/             CLI entrypoint
-internal/cli/        command routing and help rendering
-internal/app/        process bootstrapping and environment wiring
-internal/config/     global and repo config loading
-internal/git/        Git inspection helpers
-internal/history/    commit indexing orchestration
-internal/handoff/    handoff generation
-internal/output/     human, brief, and JSON rendering
-internal/resume/     resume bundle assembly
-internal/search/     ranking and retrieval logic
-internal/store/      storage interfaces
-internal/store/sqlite/ SQLite implementation details
-docs/spec/           product specs and longer-form design docs
-skills/aid/          static skill package for compatible agents
+cmd/aid/                CLI entrypoint
+internal/app/           process bootstrapping and environment wiring
+internal/cli/           command routing and help rendering
+internal/config/        global and repo config loading
+internal/git/           Git inspection helpers
+internal/handoff/       handoff generation
+internal/history/       commit indexing orchestration
+internal/output/        human, brief, and JSON rendering
+internal/resume/        resume bundle assembly
+internal/search/        ranking and retrieval logic
+internal/store/         storage interfaces
+internal/store/sqlite/  SQLite implementation details
+docs/spec/              product specs and longer-form design docs
+skills/aid/             static skill package for compatible agents
 ```
 
-## Quickstart
+## Project Status
 
-```bash
-make build
-go run ./cmd/aid --help
-go run ./cmd/aid init
-go run ./cmd/aid status --brief
-go run ./cmd/aid note add "Refresh token bug occurs after 401 retry"
-go run ./cmd/aid resume --brief
-go run ./cmd/aid handoff generate --brief
-go run ./cmd/aid history index
-go run ./cmd/aid recall "refresh token"
-go run ./cmd/aid note list --json
-go test ./...
-```
+`aid` is early, but the core local-memory workflow is already usable end to end. The current implementation includes real storage, command help, working recall and history search, and a practical resume/handoff loop.
 
-The Go module currently uses `module aid` as a local-safe placeholder. Rename it once the repository has a canonical remote path.
+The current Go module path is the local-safe placeholder `module aid`. Rename it once the repository has a canonical remote path.
 
 ## Documentation
 
-- [MVP status](docs/mvp-status.md)
-- [MVP spec](docs/spec/mvp.md)
-- [Architecture notes](docs/architecture.md)
-- [Agent skill package](skills/aid/SKILL.md)
+- [MVP status](docs/mvp-status.md) for the current implementation tracker
+- [MVP spec](docs/spec/mvp.md) for scope, goals, and non-goals
+- [Architecture notes](docs/architecture.md) for package boundaries and design constraints
+- [Agent skill package](skills/aid/SKILL.md) for agent usage guidance
+- [Contributing guide](CONTRIBUTING.md) for development and pull request expectations
+- [MIT license](LICENSE)
 
-## What To Do With The README
+## Development
 
-Keep `README.md` short and repo-facing.
+```bash
+make fmt
+make test
+go run ./cmd/aid --help
+```
 
-Use it for:
-
-- the one-paragraph product description
-- current implementation status
-- the repo layout
-- quickstart commands
-- links to the deeper docs
-
-Do not use it as the full product spec. That content belongs in `docs/spec/mvp.md`, where it can grow without turning the repo homepage into a wall of text.
-
-If you are resuming implementation work, start with `docs/mvp-status.md`.
+If you are picking up implementation work, start with [docs/mvp-status.md](docs/mvp-status.md).

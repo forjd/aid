@@ -114,6 +114,8 @@ The MVP will include five core object types:
 ### Notes
 Short observations, findings, reminders, and context fragments.
 
+Notes are always repo-scoped and may optionally be tied to a branch.
+
 Examples:
 
 - “VAT mismatch appears during invoice line aggregation”
@@ -140,7 +142,7 @@ Examples:
 - “Treat Klyant as external source of truth”
 
 ### Handoffs
-Compressed summaries of current repo state for the next session, human or agent.
+Explicitly generated, saved summaries of current repo state for the next session, human or agent.
 
 ### Commit index
 A searchable index over Git history with both keyword and semantic recall.
@@ -170,10 +172,11 @@ aid resume
 Expected result:
 
 - current branch
-- most relevant active task
+- inferred active task when unambiguous
 - latest notes
 - recent decisions
 - relevant recent commits
+- latest saved handoff when useful
 - suggested next step
 
 ### 3. Search history
@@ -191,6 +194,7 @@ aid handoff generate
 
 Expected result:
 
+- saved snapshot of current repo state
 - branch name
 - working tree state
 - recent notes
@@ -374,6 +378,7 @@ The CLI must support two output modes:
 - no surrounding commentary
 - deterministic field naming
 - include IDs where useful
+- use a versioned success/error envelope
 
 ### Example: `aid resume --brief`
 
@@ -395,27 +400,65 @@ Next:
 
 ```json
 {
-  "repo": "conveyancing-app",
-  "branch": "feat/vat-fix",
-  "active_task": {
-    "id": "t_12",
-    "text": "Fix VAT rounding on invoice lines",
-    "status": "in_progress"
+  "schema_version": "1",
+  "ok": true,
+  "command": "resume",
+  "data": {
+    "repo": {
+      "name": "conveyancing-app",
+      "path": "/path/to/conveyancing-app",
+      "branch": "feat/vat-fix"
+    },
+    "active_task": {
+      "id": "task_12",
+      "text": "Fix VAT rounding on invoice lines",
+      "status": "in_progress",
+      "branch": "feat/vat-fix",
+      "created_at": "2026-04-14T10:00:00Z",
+      "updated_at": "2026-04-14T10:15:00Z"
+    },
+    "active_task_inferred": true,
+    "notes": [
+      {
+        "id": "note_21",
+        "text": "VAT mismatch reproduced in invoice aggregation",
+        "branch": "feat/vat-fix",
+        "scope": "branch",
+        "created_at": "2026-04-14T09:40:00Z"
+      },
+      {
+        "id": "note_22",
+        "text": "Klyant values appear correct upstream",
+        "branch": null,
+        "scope": "repo",
+        "created_at": "2026-04-14T09:43:00Z"
+      }
+    ],
+    "decisions": [
+      {
+        "id": "decision_3",
+        "text": "Store money as integer pence",
+        "rationale": null,
+        "branch": "feat/vat-fix",
+        "created_at": "2026-04-13T16:20:00Z"
+      }
+    ],
+    "recent_commits": [
+      {
+        "sha": "8d12c3a",
+        "summary": "fix: normalise invoice VAT calculation",
+        "message": "fix: normalise invoice VAT calculation",
+        "author": "Dan",
+        "committed_at": "2026-04-14T08:55:00Z",
+        "changed_paths": [
+          "app/invoices.py"
+        ]
+      }
+    ],
+    "latest_handoff": null,
+    "next_action": "inspect invoice line subtotal rounding path"
   },
-  "notes": [
-    "VAT mismatch reproduced in invoice aggregation",
-    "Klyant values appear correct upstream"
-  ],
-  "decisions": [
-    "Store money as integer pence"
-  ],
-  "recent_commits": [
-    {
-      "sha": "8d12c3a",
-      "summary": "fix: normalise invoice VAT calculation"
-    }
-  ],
-  "next_action": "inspect invoice line subtotal rounding path"
+  "error": null
 }
 ```
 
@@ -460,6 +503,8 @@ Token efficiency is a first-class product requirement.
 - `--json` output should be stable and compact
 - provide only the fields an agent needs
 - keep schema flat where possible
+- use `null` for missing single values and `[]` for empty collections
+- use RFC 3339 UTC timestamps
 
 ---
 
@@ -468,6 +513,14 @@ Token efficiency is a first-class product requirement.
 ### Local storage
 
 Use SQLite for the MVP.
+
+The primary database should live in the user's local app-data directory, not inside the repository.
+
+Suggested defaults:
+
+- macOS: `~/Library/Application Support/aid/aid.db`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/aid/aid.db`
+- Windows: `%LocalAppData%\\aid\\aid.db`
 
 ### Why SQLite
 
@@ -492,6 +545,7 @@ Use SQLite for the MVP.
 - `id`
 - `repo_id`
 - `branch`
+- `scope`
 - `text`
 - `tags`
 - `created_at`
@@ -501,6 +555,7 @@ Use SQLite for the MVP.
 - `id`
 - `repo_id`
 - `branch`
+- `scope`
 - `text`
 - `status`
 - `created_at`
@@ -582,7 +637,7 @@ This command should gather and store:
 - date
 - commit message
 - changed file paths
-- short generated summary
+- short heuristic summary
 
 ### Summary strategy
 
@@ -591,9 +646,10 @@ Do not embed raw diffs in full by default.
 Instead:
 
 1. capture commit metadata
-2. derive a short summary of the change
-3. store changed paths
-4. optionally embed the summary
+2. prefer the commit subject when it is already useful
+3. otherwise derive a deterministic summary from metadata and changed paths
+4. store changed paths
+5. optionally embed the summary
 
 This keeps the index smaller and more useful.
 
@@ -609,7 +665,7 @@ aid history search "why was soft delete added to payment intents"
 
 ## Agent skill file
 
-A core part of the product is shipping a skill file with the repo so the user can give their agent clear instructions on how to use `aid`.
+A core part of the product is shipping a static Agent Skills-compatible skill package with the repo so the user can give their agent clear instructions on how to use `aid`.
 
 This file should explain:
 
@@ -619,16 +675,19 @@ This file should explain:
 - how to keep output token-efficient
 - how to write notes and decisions well
 
-### Proposed file name
+The skill should be version-controlled and maintained like any other repo artifact. It should not be generated dynamically by `aid`.
 
-`AID_SKILL.md`
+Users can install it into compatible agents with tools such as `npx skills` or `bunx skills`, or by copying it manually.
 
-Alternative names:
+### Proposed format
 
-- `AGENT_AID.md`
-- `aid.skill.md`
+A standard skill package centered on:
 
-`AID_SKILL.md` is clear and easy to spot.
+- `SKILL.md`
+
+Suggested repo path:
+
+- `skills/aid/SKILL.md`
 
 ### Skill file objectives
 
@@ -688,14 +747,12 @@ Generate a handoff:
 1. verify the current directory is inside a Git repository
 2. create local storage if needed
 3. attach the repo to the local `aid` database
-4. optionally generate a starter `AID_SKILL.md`
-5. optionally create a repo-local config file
+4. optionally create a repo-local config file
 
 ### Possible generated files
 
 ```text
 .aid/config.toml
-AID_SKILL.md
 ```
 
 The repo-local config should remain simple in the MVP.
@@ -732,7 +789,7 @@ default_mode = "brief"
 ignore_paths = ["vendor/", "node_modules/", "storage/"]
 
 [agent]
-skill_file = "AID_SKILL.md"
+skill_path = "skills/aid/SKILL.md"
 ```
 
 ---
@@ -750,7 +807,7 @@ The MVP is complete when a user can:
 7. search indexed history
 8. run `aid resume` and get a compact, useful context summary
 9. use `--json` output for scripting or agents
-10. generate or include an `AID_SKILL.md` file in the repo
+10. include a static `SKILL.md` skill package in the repo
 
 ---
 
@@ -808,7 +865,7 @@ The MVP is successful if it reduces friction in real agent workflows.
 
 - `--json`
 - `--brief`
-- starter `AID_SKILL.md`
+- static `SKILL.md` skill package
 
 ### Phase 5
 
@@ -818,17 +875,15 @@ The MVP is successful if it reduces friction in real agent workflows.
 
 ---
 
-## Open questions
+## Resolved MVP decisions
 
-These do not need to block the MVP, but should be answered early.
-
-1. Should notes be branch-scoped, repo-scoped, or both?
-2. Should `aid resume` automatically infer the “active task”?
-3. Should handoffs be explicitly saved or generated on demand only?
-4. Should commit summaries be model-generated, heuristic, or hybrid?
-5. Where should the SQLite database live by default?
-6. Should `AID_SKILL.md` be generated automatically or via a separate command?
-7. What should the stable JSON schema look like for agents?
+1. Notes are always stored against a repository and may optionally be tied to a branch. `aid note add` should default to the current branch, with repo-wide notes being explicit.
+2. `aid resume` should infer the active task when there is a single clear candidate. If task state is ambiguous, it should say so instead of guessing.
+3. Handoffs are explicit saved snapshots. `aid handoff generate` both displays and stores the generated handoff.
+4. Commit summaries are heuristic in the MVP. Use the existing commit subject when it is good enough and fall back to deterministic path- and metadata-based summarisation.
+5. The primary SQLite database lives in the user's local app-data directory by default. Repositories may contain lightweight config, but not the main database.
+6. Agent instructions are shipped as a static Agent Skills-compatible `SKILL.md` package in the repo. `aid` does not generate this file dynamically.
+7. `--json` output uses a versioned, stable envelope with consistent resource objects, explicit nulls, and command-specific payloads.
 
 ---
 
@@ -865,4 +920,4 @@ Its defining features are:
 
 If the MVP works, `aid` becomes the first command an agent runs when entering a repository, and the last command it runs before leaving.
 
-The next sensible step is to turn this into a polished `README.md` plus a first draft of `AID_SKILL.md`.
+The next sensible step is to turn this into a polished `README.md` plus a first draft of a static `SKILL.md` package.

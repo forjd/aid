@@ -391,15 +391,23 @@ func (s *Store) ListTasks(ctx context.Context, repoID int64, limit int) ([]store
 }
 
 func (s *Store) CompleteTask(ctx context.Context, repoID int64, taskID int64) (store.Task, error) {
+	return s.UpdateTaskStatus(ctx, repoID, taskID, store.TaskDone)
+}
+
+func (s *Store) UpdateTaskStatus(ctx context.Context, repoID int64, taskID int64, status store.TaskStatus) (store.Task, error) {
+	if !isValidTaskStatus(status) {
+		return store.Task{}, fmt.Errorf("invalid task status %q", status)
+	}
+
 	now := nowUTC()
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE tasks
 		SET status = ?, updated_at = ?
 		WHERE repo_id = ? AND id = ?
-	`, string(store.TaskDone), formatTime(now), repoID, taskID)
+	`, string(status), formatTime(now), repoID, taskID)
 	if err != nil {
-		return store.Task{}, fmt.Errorf("complete task: %w", err)
+		return store.Task{}, fmt.Errorf("update task status: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -546,6 +554,41 @@ func (s *Store) ListHandoffs(ctx context.Context, repoID int64, limit int) ([]st
 	}
 
 	return handoffs, nil
+}
+
+func (s *Store) ListCommits(ctx context.Context, repoID int64, limit int) ([]store.Commit, error) {
+	query := `
+		SELECT id, repo_id, sha, author, committed_at, message, changed_paths, summary, indexed_at
+		FROM commits
+		WHERE repo_id = ?
+		ORDER BY committed_at DESC, id DESC
+	`
+	args := []any{repoID}
+	if limit > 0 {
+		query += "\n\t\tLIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list commits: %w", err)
+	}
+	defer rows.Close()
+
+	var commits []store.Commit
+	for rows.Next() {
+		commit, err := scanCommit(rows)
+		if err != nil {
+			return nil, err
+		}
+		commits = append(commits, commit)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate commits: %w", err)
+	}
+
+	return commits, nil
 }
 
 func (s *Store) ReplaceCommits(ctx context.Context, input store.ReplaceCommitsInput) error {
@@ -1250,6 +1293,15 @@ func sameCommit(existing store.Commit, candidate store.Commit) bool {
 	}
 
 	return true
+}
+
+func isValidTaskStatus(status store.TaskStatus) bool {
+	switch status {
+	case store.TaskOpen, store.TaskInProgress, store.TaskDone, store.TaskBlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 func insertNoteFTS(ctx context.Context, exec execer, note store.Note) error {

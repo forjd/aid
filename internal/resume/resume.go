@@ -2,8 +2,8 @@ package resume
 
 import (
 	"sort"
+	"strings"
 
-	"github.com/forjd/aid/internal/git"
 	"github.com/forjd/aid/internal/store"
 )
 
@@ -13,14 +13,27 @@ type Bundle struct {
 	ActiveTaskAmbiguous bool
 	Notes               []store.Note
 	Decisions           []store.Decision
-	RecentCommits       []git.Commit
+	RecentCommits       []store.Commit
 	LatestHandoff       *store.Handoff
 	OpenQuestions       []string
 	NextAction          *string
 }
 
-func Build(branch string, notes []store.Note, tasks []store.Task, decisions []store.Decision, commits []git.Commit, latestHandoff *store.Handoff) Bundle {
+func Build(branch string, notes []store.Note, tasks []store.Task, decisions []store.Decision, commits []store.Commit, handoffs []store.Handoff) Bundle {
 	activeTask, inferred, ambiguous := inferActiveTask(branch, tasks)
+	rankedHandoffs := rankHandoffs(branch, handoffs, 3)
+
+	var latestHandoff *store.Handoff
+	if len(rankedHandoffs) > 0 {
+		latest := rankedHandoffs[0]
+		latestHandoff = &latest
+	}
+
+	openQuestions := inferOpenQuestions(branch, activeTask, ambiguous, tasks)
+	openQuestions = appendCarryForwardQuestions(openQuestions, rankedHandoffs)
+
+	nextAction := inferNextAction(branch, activeTask, ambiguous, tasks)
+	nextAction = carryForwardNextAction(nextAction, rankedHandoffs)
 
 	return Bundle{
 		ActiveTask:          activeTask,
@@ -30,8 +43,8 @@ func Build(branch string, notes []store.Note, tasks []store.Task, decisions []st
 		Decisions:           rankDecisions(branch, decisions, 3),
 		RecentCommits:       limitCommits(commits, 5),
 		LatestHandoff:       latestHandoff,
-		OpenQuestions:       inferOpenQuestions(branch, activeTask, ambiguous, tasks),
-		NextAction:          inferNextAction(branch, activeTask, ambiguous, tasks),
+		OpenQuestions:       openQuestions,
+		NextAction:          nextAction,
 	}
 }
 
@@ -148,7 +161,7 @@ func limitDecisions(decisions []store.Decision, limit int) []store.Decision {
 	return decisions[:limit]
 }
 
-func limitCommits(commits []git.Commit, limit int) []git.Commit {
+func limitCommits(commits []store.Commit, limit int) []store.Commit {
 	if len(commits) <= limit {
 		return commits
 	}
@@ -227,4 +240,140 @@ func firstTask(branch string, tasks []store.Task, status store.TaskStatus, branc
 	}
 
 	return nil
+}
+
+func rankHandoffs(branch string, handoffs []store.Handoff, limit int) []store.Handoff {
+	cloned := append([]store.Handoff(nil), handoffs...)
+	sort.SliceStable(cloned, func(i, j int) bool {
+		leftRank := branchRank(branch, cloned[i].Branch)
+		rightRank := branchRank(branch, cloned[j].Branch)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+
+		if !cloned[i].CreatedAt.Equal(cloned[j].CreatedAt) {
+			return cloned[i].CreatedAt.After(cloned[j].CreatedAt)
+		}
+
+		return cloned[i].ID > cloned[j].ID
+	})
+
+	if len(cloned) <= limit {
+		return cloned
+	}
+	return cloned[:limit]
+}
+
+func appendCarryForwardQuestions(current []string, handoffs []store.Handoff) []string {
+	if len(current) >= 3 {
+		return current[:3]
+	}
+
+	seen := make(map[string]struct{}, len(current))
+	for _, question := range current {
+		seen[normalizedText(question)] = struct{}{}
+	}
+
+	for _, handoff := range handoffs {
+		for _, question := range parseHandoffQuestions(handoff.Summary) {
+			key := normalizedText(question)
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+
+			current = append(current, question)
+			seen[key] = struct{}{}
+			if len(current) == 3 {
+				return current
+			}
+		}
+	}
+
+	return current
+}
+
+func carryForwardNextAction(current *string, handoffs []store.Handoff) *string {
+	if current != nil {
+		return current
+	}
+
+	for _, handoff := range handoffs {
+		next := parseHandoffNextAction(handoff.Summary)
+		if next == nil {
+			continue
+		}
+		return next
+	}
+
+	return nil
+}
+
+func parseHandoffQuestions(summary string) []string {
+	lines := strings.Split(summary, "\n")
+	questions := make([]string, 0, 3)
+	inSection := false
+
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		switch line {
+		case "Open questions:":
+			inSection = true
+			continue
+		case "Recommended next action:", "Recent commits:", "Key decisions:", "Recent notes:", "Open tasks:", "Latest handoff:", "Branch:", "Worktree:":
+			inSection = false
+		}
+
+		if !inSection || !strings.HasPrefix(line, "- ") {
+			continue
+		}
+
+		question := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		if question == "" || isEphemeralQuestion(question) {
+			continue
+		}
+		questions = append(questions, question)
+	}
+
+	return questions
+}
+
+func parseHandoffNextAction(summary string) *string {
+	lines := strings.Split(summary, "\n")
+	inSection := false
+
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "Recommended next action:" {
+			inSection = true
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		if !strings.HasPrefix(line, "- ") {
+			if line != "" {
+				break
+			}
+			continue
+		}
+
+		next := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		if next == "" {
+			return nil
+		}
+		return &next
+	}
+
+	return nil
+}
+
+func isEphemeralQuestion(question string) bool {
+	return normalizedText(question) == normalizedText("Should the current uncommitted changes be kept, finished, or discarded?")
+}
+
+func normalizedText(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

@@ -133,6 +133,21 @@ func TestInitAndCrudFlow(t *testing.T) {
 		t.Fatalf("expected task output, got %q", taskOut)
 	}
 
+	taskStartOut := runCLI(t, "task", "start", "task_1")
+	if !strings.Contains(taskStartOut, "task_1") || !strings.Contains(taskStartOut, "in_progress") {
+		t.Fatalf("expected task start output, got %q", taskStartOut)
+	}
+
+	taskBlockOut := runCLI(t, "task", "block", "task_1")
+	if !strings.Contains(taskBlockOut, "task_1") || !strings.Contains(taskBlockOut, "blocked") {
+		t.Fatalf("expected task block output, got %q", taskBlockOut)
+	}
+
+	taskReopenOut := runCLI(t, "task", "reopen", "task_1")
+	if !strings.Contains(taskReopenOut, "task_1") || !strings.Contains(taskReopenOut, "open") {
+		t.Fatalf("expected task reopen output, got %q", taskReopenOut)
+	}
+
 	taskDoneOut := runCLI(t, "task", "done", "task_1")
 	if !strings.Contains(taskDoneOut, "task_1") {
 		t.Fatalf("expected task done output, got %q", taskDoneOut)
@@ -793,6 +808,65 @@ func TestHistoryIndexUsesIgnorePathsAndIncrementalSync(t *testing.T) {
 	}
 }
 
+func TestHistoryIndexPrunesCommitsNoLongerReachable(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("base\n"))
+	runGit(t, repoDir, "add", "README.md")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "chore: base commit")
+	runGit(t, repoDir, "checkout", "-q", "-b", "feature/refresh")
+	writeFile(t, filepath.Join(repoDir, "branch_only.txt"), []byte("refresh branch\n"))
+	runGit(t, repoDir, "add", "branch_only.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: branch-only refresh work")
+	runGit(t, repoDir, "checkout", "-q", "main")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+
+	firstIndex := runCLI(t, "history", "index", "--verbose")
+	for _, want := range []string{
+		"Commits indexed: 2",
+		"Commits added: 2",
+		"Commits removed: 0",
+	} {
+		if !strings.Contains(firstIndex, want) {
+			t.Fatalf("expected first history index output to contain %q\n\n%s", want, firstIndex)
+		}
+	}
+
+	runGit(t, repoDir, "branch", "-D", "feature/refresh")
+
+	secondIndex := runCLI(t, "history", "index", "--verbose")
+	for _, want := range []string{
+		"Mode: incremental sync",
+		"Commits indexed: 1",
+		"Commits removed: 1",
+	} {
+		if !strings.Contains(secondIndex, want) {
+			t.Fatalf("expected second history index output to contain %q\n\n%s", want, secondIndex)
+		}
+	}
+
+	prunedSearch := runCLI(t, "history", "search", "branch-only", "--brief")
+	if !strings.Contains(prunedSearch, "No matching commits.") {
+		t.Fatalf("expected deleted branch commit to be pruned from history, got %q", prunedSearch)
+	}
+}
+
 func TestRecallSearchesAcrossStoredContext(t *testing.T) {
 	repoDir := t.TempDir()
 	dataDir := filepath.Join(t.TempDir(), "aid-data")
@@ -964,6 +1038,60 @@ func TestResumeAndHandoffHighlightBlockedWork(t *testing.T) {
 	}
 }
 
+func TestResumeAndHandoffCarryForwardPriorHandoffContext(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	insertHandoff(t, repoDir, strings.Join([]string{
+		"Branch: main",
+		"Worktree: clean",
+		"Open questions:",
+		"- Should retry backoff be preserved for 401 recovery?",
+		"Recommended next action:",
+		"- inspect auth/session.go before changing retry semantics",
+	}, "\n"))
+
+	briefResume := runCLI(t, "resume", "--brief")
+	for _, want := range []string{
+		"Open questions:",
+		"Should retry backoff be preserved for 401 recovery?",
+		"Next:",
+		"inspect auth/session.go before changing retry semantics",
+	} {
+		if !strings.Contains(briefResume, want) {
+			t.Fatalf("expected resume output to contain %q\n\n%s", want, briefResume)
+		}
+	}
+
+	handoffOut := runCLI(t, "handoff", "generate", "--brief")
+	for _, want := range []string{
+		"Open questions:",
+		"Should retry backoff be preserved for 401 recovery?",
+		"Recommended next action:",
+		"inspect auth/session.go before changing retry semantics",
+	} {
+		if !strings.Contains(handoffOut, want) {
+			t.Fatalf("expected handoff output to contain %q\n\n%s", want, handoffOut)
+		}
+	}
+}
+
 func insertTaskWithStatus(t *testing.T, repoDir string, statusText string, status store.TaskStatus) {
 	t.Helper()
 
@@ -999,6 +1127,42 @@ func insertTaskWithStatus(t *testing.T, repoDir string, statusText string, statu
 		Status: status,
 	}); err != nil {
 		t.Fatalf("add task with status %q: %v", status, err)
+	}
+}
+
+func insertHandoff(t *testing.T, repoDir string, summary string) {
+	t.Helper()
+
+	ctx := context.Background()
+	env, err := app.Discover(repoDir)
+	if err != nil {
+		t.Fatalf("discover environment: %v", err)
+	}
+
+	sqliteStore, err := sqlitestore.Open(env.DBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	if err := sqliteStore.Migrate(ctx); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	repo, err := sqliteStore.FindRepoByPath(ctx, env.RepoRoot)
+	if err != nil {
+		t.Fatalf("find repo: %v", err)
+	}
+	if repo == nil {
+		t.Fatal("expected initialised repo to exist")
+	}
+
+	if _, err := sqliteStore.AddHandoff(ctx, store.AddHandoffInput{
+		RepoID:  repo.ID,
+		Branch:  env.Branch,
+		Summary: summary,
+	}); err != nil {
+		t.Fatalf("add handoff: %v", err)
 	}
 }
 

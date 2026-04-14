@@ -23,7 +23,7 @@ If you are resuming work in a new session:
 
 ## Current Summary
 
-The core local-memory workflow is implemented end to end, and the main post-MVP quality gaps have been closed.
+The core local-memory workflow is implemented end to end, and the previously listed follow-up gaps around task state control, history indexing cost, and resume / handoff reuse have now been closed.
 
 Working commands:
 
@@ -35,6 +35,9 @@ Working commands:
 - `aid note list`
 - `aid task add`
 - `aid task list`
+- `aid task start`
+- `aid task block`
+- `aid task reopen`
 - `aid task done`
 - `aid decide add`
 - `aid decide list`
@@ -57,6 +60,7 @@ Working global flags:
 - `aid init` initialises repo state and writes `.aid/config.toml`.
 - Notes can be added and listed.
 - Tasks can be added, listed, and completed.
+- Tasks can now also be moved directly to `in_progress`, `blocked`, and back to `open`.
 - Decisions can be added and listed.
 - `aid status` reports repo state and counts.
 - `aid resume` builds a compact working summary with active-task inference.
@@ -70,18 +74,21 @@ Working global flags:
 - Tests cover the main end-to-end command flows.
 - `aid resume` now carries richer next-action heuristics, open questions, and the latest saved handoff when available.
 - `aid handoff generate` now includes open questions and more deliberate next-action synthesis.
+- `aid resume` and `aid handoff generate` now reuse indexed commits when available instead of relying only on live Git reads.
+- `aid resume` and `aid handoff generate` now carry forward prior handoff questions and next actions when current context is otherwise thin.
 - Repo config is now used for default output mode selection and history indexing ignore paths.
 - `aid history index` now performs incremental sync against stored commits instead of clearing and replacing the index each run.
+- `aid history index` now reconciles against reachable commit SHAs first and only fetches full metadata for newly discovered commits.
 - SQLite migrations now use an explicit schema version.
 - The Go module path is now the canonical `github.com/forjd/aid`.
+- The repo now explicitly stays FTS-first; optional embeddings are deferred until real recall gaps justify the added complexity.
 
 ## Partial
 
-- History indexing still reads full Git history before reconciling the local index, even though the SQLite write path is now incremental.
+- None at the moment.
 
 ## Not Started
 
-- Optional embeddings / semantic search.
 - Any TUI, background daemon, cloud sync, or team collaboration work.
 
 ## MVP Acceptance Checklist
@@ -99,13 +106,11 @@ Working global flags:
 
 ## Recommended Next Work
 
-1. Decide whether optional embeddings / semantic search are worth adding beyond the new FTS-based recall.
-2. Reduce `history index` Git read cost so it can avoid scanning the full history before syncing.
-3. Expand task lifecycle commands beyond `task done` so agents can set `in_progress` and `blocked` directly.
-4. Explore whether resume and handoff synthesis should start using indexed history and prior handoffs more aggressively.
+1. Validate the FTS-only recall path in larger real repos before revisiting embeddings.
+2. Decide whether post-MVP expansion should go toward a TUI, background automation, or multi-user sync instead of keeping the tool intentionally CLI-only.
 
 ## Open Notes
 
 - The current implementation already satisfies the practical MVP command surface.
-- Remaining work is now mostly optional search depth and future product expansion rather than missing or weak core commands.
+- Remaining work is now product-expansion work rather than missing core command behavior.
 - Future sessions should treat this file as the source of truth for implementation status.

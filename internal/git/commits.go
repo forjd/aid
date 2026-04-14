@@ -19,6 +19,11 @@ type Commit struct {
 	ChangedPaths []string
 }
 
+const (
+	commitLogFormat = "--format=%H%x1f%an%x1f%aI%x1f%s"
+	commitBatchSize = 256
+)
+
 func RecentCommits(startDir string, limit int) ([]Commit, error) {
 	return Commits(startDir, limit)
 }
@@ -28,28 +33,68 @@ func Commits(startDir string, limit int) ([]Commit, error) {
 	if limit > 0 {
 		args = append(args, fmt.Sprintf("-%d", limit))
 	}
-	args = append(args, "--format=%H%x1f%an%x1f%aI%x1f%s", "--name-only")
+	args = append(args, commitLogFormat, "--name-only")
 
-	cmd := exec.Command("git", args...)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	output, err := cmd.Output()
+	output, err := runGitOutput(args...)
 	if err != nil {
-		if errors.As(err, new(*exec.ExitError)) {
-			message := strings.TrimSpace(stderr.String())
-			if strings.Contains(message, "does not have any commits yet") || strings.Contains(message, "your current branch") && strings.Contains(message, "does not have any commits yet") {
-				return nil, nil
-			}
-
-			return nil, fmt.Errorf("%s", message)
-		}
-
 		return nil, err
 	}
 
 	return parseCommits(output, limit)
+}
+
+func AllCommitSHAs(startDir string) ([]string, error) {
+	output, err := runGitOutput("-C", startDir, "rev-list", "--all")
+	if err != nil {
+		return nil, err
+	}
+
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	shas := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		shas = append(shas, line)
+	}
+
+	return shas, nil
+}
+
+func CommitsBySHA(startDir string, shas []string) ([]Commit, error) {
+	if len(shas) == 0 {
+		return nil, nil
+	}
+
+	commits := make([]Commit, 0, len(shas))
+	for start := 0; start < len(shas); start += commitBatchSize {
+		end := start + commitBatchSize
+		if end > len(shas) {
+			end = len(shas)
+		}
+
+		args := []string{"-C", startDir, "log", "--no-walk=sorted", commitLogFormat, "--name-only"}
+		args = append(args, shas[start:end]...)
+
+		output, err := runGitOutput(args...)
+		if err != nil {
+			return nil, err
+		}
+
+		batch, err := parseCommits(output, end-start)
+		if err != nil {
+			return nil, err
+		}
+		commits = append(commits, batch...)
+	}
+
+	return commits, nil
 }
 
 func parseCommits(output []byte, limit int) ([]Commit, error) {
@@ -106,4 +151,30 @@ func parseCommits(output []byte, limit int) ([]Commit, error) {
 	}
 
 	return commits, nil
+}
+
+func runGitOutput(args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	output, err := cmd.Output()
+	if err != nil {
+		if errors.As(err, new(*exec.ExitError)) {
+			message := strings.TrimSpace(stderr.String())
+			if strings.Contains(message, "does not have any commits yet") || strings.Contains(message, "your current branch") && strings.Contains(message, "does not have any commits yet") {
+				return nil, nil
+			}
+			if message == "" {
+				message = err.Error()
+			}
+
+			return nil, fmt.Errorf("%s", message)
+		}
+
+		return nil, err
+	}
+
+	return output, nil
 }

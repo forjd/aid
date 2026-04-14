@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"aid/internal/git"
+	"github.com/forjd/aid/internal/git"
 )
 
 type Environment struct {

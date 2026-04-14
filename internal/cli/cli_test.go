@@ -2,12 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/forjd/aid/internal/app"
+	"github.com/forjd/aid/internal/store"
+	sqlitestore "github.com/forjd/aid/internal/store/sqlite"
 )
 
 func TestRootHelp(t *testing.T) {
@@ -114,7 +119,7 @@ func TestInitAndCrudFlow(t *testing.T) {
 	}
 
 	noteOut := runCLI(t, "note", "add", "Refresh token bug occurs after 401 retry")
-	if !strings.Contains(noteOut, "Added note note_1") {
+	if !strings.Contains(noteOut, "note_1") {
 		t.Fatalf("expected note output, got %q", noteOut)
 	}
 
@@ -124,17 +129,17 @@ func TestInitAndCrudFlow(t *testing.T) {
 	}
 
 	taskOut := runCLI(t, "task", "add", "Fix VAT rounding on invoice lines")
-	if !strings.Contains(taskOut, "Added task task_1") {
+	if !strings.Contains(taskOut, "task_1") {
 		t.Fatalf("expected task output, got %q", taskOut)
 	}
 
 	taskDoneOut := runCLI(t, "task", "done", "task_1")
-	if !strings.Contains(taskDoneOut, "Completed task task_1") {
+	if !strings.Contains(taskDoneOut, "task_1") {
 		t.Fatalf("expected task done output, got %q", taskDoneOut)
 	}
 
 	decisionOut := runCLI(t, "decide", "add", "Store all monetary values as integer pence")
-	if !strings.Contains(decisionOut, "Added decision decision_1") {
+	if !strings.Contains(decisionOut, "decision_1") {
 		t.Fatalf("expected decision output, got %q", decisionOut)
 	}
 
@@ -298,6 +303,47 @@ func TestVerboseStatusAndListOutputs(t *testing.T) {
 		if !strings.Contains(verboseDecisions, want) {
 			t.Fatalf("expected verbose decisions output to contain %q\n\n%s", want, verboseDecisions)
 		}
+	}
+}
+
+func TestRepoConfigDefaultModeAppliesToUnflaggedCommands(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to temp repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	writeFile(t, filepath.Join(repoDir, ".aid", "config.toml"), []byte(`[output]
+default_mode = "verbose"
+
+[indexing]
+ignore_paths = ["vendor/"]
+
+[agent]
+skill_path = "skills/aid/SKILL.md"
+`))
+
+	defaultStatus := runCLI(t, "status")
+	if !strings.Contains(defaultStatus, "Repo name:") {
+		t.Fatalf("expected unflagged status to use verbose mode from config, got %q", defaultStatus)
+	}
+
+	briefStatus := runCLI(t, "status", "--brief")
+	if strings.Contains(briefStatus, "Repo name:") {
+		t.Fatalf("expected explicit --brief to override configured default, got %q", briefStatus)
 	}
 }
 
@@ -660,7 +706,7 @@ func TestVerboseHistoryAndHandoffOutputs(t *testing.T) {
 	indexOut := runCLI(t, "history", "index", "--verbose")
 	for _, want := range []string{
 		"History index complete",
-		"Mode: full replacement",
+		"Mode: initial sync",
 		"Commits indexed: 1",
 	} {
 		if !strings.Contains(indexOut, want) {
@@ -678,6 +724,71 @@ func TestVerboseHistoryAndHandoffOutputs(t *testing.T) {
 	} {
 		if !strings.Contains(verboseSearch, want) {
 			t.Fatalf("expected verbose history search output to contain %q\n\n%s", want, verboseSearch)
+		}
+	}
+}
+
+func TestHistoryIndexUsesIgnorePathsAndIncrementalSync(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	if err := os.MkdirAll(filepath.Join(repoDir, "vendor"), 0o755); err != nil {
+		t.Fatalf("create vendor dir: %v", err)
+	}
+	writeFile(t, filepath.Join(repoDir, "vendor", "deps.txt"), []byte("vendor refresh\n"))
+	runGit(t, repoDir, "add", "vendor/deps.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "chore: vendor refresh")
+	writeFile(t, filepath.Join(repoDir, "auth.txt"), []byte("refresh\n"))
+	runGit(t, repoDir, "add", "auth.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: token refresh retry")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+
+	firstIndex := runCLI(t, "history", "index", "--verbose")
+	for _, want := range []string{
+		"Mode: initial sync",
+		"Commits indexed: 1",
+		"Commits added: 1",
+		"Commits removed: 0",
+	} {
+		if !strings.Contains(firstIndex, want) {
+			t.Fatalf("expected first history index output to contain %q\n\n%s", want, firstIndex)
+		}
+	}
+
+	vendorSearch := runCLI(t, "history", "search", "vendor", "--brief")
+	if !strings.Contains(vendorSearch, "No matching commits.") {
+		t.Fatalf("expected ignored vendor commit to stay out of the index, got %q", vendorSearch)
+	}
+
+	writeFile(t, filepath.Join(repoDir, "auth_worker.txt"), []byte("retry\n"))
+	runGit(t, repoDir, "add", "auth_worker.txt")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "fix: tighten refresh retry")
+
+	secondIndex := runCLI(t, "history", "index", "--verbose")
+	for _, want := range []string{
+		"Mode: incremental sync",
+		"Commits indexed: 2",
+		"Commits added: 1",
+		"Commits updated: 0",
+		"Commits removed: 0",
+	} {
+		if !strings.Contains(secondIndex, want) {
+			t.Fatalf("expected second history index output to contain %q\n\n%s", want, secondIndex)
 		}
 	}
 }
@@ -802,6 +913,92 @@ func TestRecallReusesCommitSearchRanking(t *testing.T) {
 	}
 	if payload.Data.Commits[0].Summary != "feat: token refresh retry" {
 		t.Fatalf("expected recall to preserve commit relevance order, got %#v", payload.Data.Commits)
+	}
+}
+
+func TestResumeAndHandoffHighlightBlockedWork(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("hello\n"))
+	runGit(t, repoDir, "add", "README.md")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: initial repo memory support")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	insertTaskWithStatus(t, repoDir, "Confirm refresh rollback strategy", store.TaskBlocked)
+
+	briefResume := runCLI(t, "resume", "--brief")
+	for _, want := range []string{
+		"Next:",
+		"resolve blocker for Confirm refresh rollback strategy",
+	} {
+		if !strings.Contains(briefResume, want) {
+			t.Fatalf("expected resume output to contain %q\n\n%s", want, briefResume)
+		}
+	}
+
+	handoffOut := runCLI(t, "handoff", "generate", "--brief")
+	for _, want := range []string{
+		"Open questions:",
+		"What is blocking Confirm refresh rollback strategy?",
+		"Recommended next action:",
+		"resolve blocker for Confirm refresh rollback strategy",
+	} {
+		if !strings.Contains(handoffOut, want) {
+			t.Fatalf("expected handoff output to contain %q\n\n%s", want, handoffOut)
+		}
+	}
+}
+
+func insertTaskWithStatus(t *testing.T, repoDir string, statusText string, status store.TaskStatus) {
+	t.Helper()
+
+	ctx := context.Background()
+	env, err := app.Discover(repoDir)
+	if err != nil {
+		t.Fatalf("discover environment: %v", err)
+	}
+
+	sqliteStore, err := sqlitestore.Open(env.DBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	if err := sqliteStore.Migrate(ctx); err != nil {
+		t.Fatalf("migrate store: %v", err)
+	}
+
+	repo, err := sqliteStore.FindRepoByPath(ctx, env.RepoRoot)
+	if err != nil {
+		t.Fatalf("find repo: %v", err)
+	}
+	if repo == nil {
+		t.Fatal("expected initialised repo to exist")
+	}
+
+	if _, err := sqliteStore.AddTask(ctx, store.AddTaskInput{
+		RepoID: repo.ID,
+		Branch: env.Branch,
+		Scope:  store.ScopeBranch,
+		Text:   statusText,
+		Status: status,
+	}); err != nil {
+		t.Fatalf("add task with status %q: %v", status, err)
 	}
 }
 

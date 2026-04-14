@@ -23,7 +23,7 @@ If you are resuming work in a new session:
 
 ## Current Summary
 
-The core local-memory workflow is implemented end to end.
+The core local-memory workflow is implemented end to end, and the main post-MVP quality gaps have been closed.
 
 Working commands:
 
@@ -64,24 +64,24 @@ Working global flags:
 - `aid handoff list` reads saved handoffs.
 - `aid history index` stores commit metadata in SQLite.
 - `aid history search` searches indexed commits with SQLite FTS ranking.
-- `aid recall` searches notes, decisions, handoffs, and indexed commits together, reusing commit search ranking.
+- `aid recall` searches notes, decisions, handoffs, and indexed commits together with SQLite FTS ranking across all stored context types.
 - Human-readable output, `--brief`, `--verbose`, and `--json` are implemented for the working commands.
 - The repo includes a static skill package at [skills/aid/SKILL.md](../skills/aid/SKILL.md).
 - Tests cover the main end-to-end command flows.
+- `aid resume` now carries richer next-action heuristics, open questions, and the latest saved handoff when available.
+- `aid handoff generate` now includes open questions and more deliberate next-action synthesis.
+- Repo config is now used for default output mode selection and history indexing ignore paths.
+- `aid history index` now performs incremental sync against stored commits instead of clearing and replacing the index each run.
+- SQLite migrations now use an explicit schema version.
+- The Go module path is now the canonical `github.com/forjd/aid`.
 
 ## Partial
 
-- Recall ranking for notes, decisions, and handoffs is still basic branch-aware filtering; only commits use FTS relevance ranking.
-- Handoff summaries are useful, but still heuristic and fairly simple.
-- Repo config is created, but only lightly used after init.
-- The Go module path is still the local placeholder `module aid`.
+- History indexing still reads full Git history before reconciling the local index, even though the SQLite write path is now incremental.
 
 ## Not Started
 
 - Optional embeddings / semantic search.
-- Incremental history indexing instead of replacing the full commit index each run.
-- Richer handoff generation with open questions and more deliberate next-step synthesis.
-- Better schema migration/versioning strategy.
 - Any TUI, background daemon, cloud sync, or team collaboration work.
 
 ## MVP Acceptance Checklist
@@ -99,13 +99,13 @@ Working global flags:
 
 ## Recommended Next Work
 
-1. Improve `resume` and handoff ranking so active work and suggested next steps are more reliable.
-2. Extend search ranking beyond commits so notes, decisions, and handoffs get stronger relevance ordering.
-3. Move from full history reindexing to incremental indexing.
-4. Rename the Go module once the canonical repository path is known.
+1. Decide whether optional embeddings / semantic search are worth adding beyond the new FTS-based recall.
+2. Reduce `history index` Git read cost so it can avoid scanning the full history before syncing.
+3. Expand task lifecycle commands beyond `task done` so agents can set `in_progress` and `blocked` directly.
+4. Explore whether resume and handoff synthesis should start using indexed history and prior handoffs more aggressively.
 
 ## Open Notes
 
 - The current implementation already satisfies the practical MVP command surface.
-- Remaining work is mostly quality, ranking, and polish rather than missing core commands.
+- Remaining work is now mostly optional search depth and future product expansion rather than missing or weak core commands.
 - Future sessions should treat this file as the source of truth for implementation status.

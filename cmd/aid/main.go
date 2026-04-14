@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"aid/internal/cli"
+	"github.com/forjd/aid/internal/cli"
 )
 
 func main() {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"aid/internal/store"
+	"github.com/forjd/aid/internal/store"
 )
 
 func TestStoreCRUDFlow(t *testing.T) {
@@ -241,5 +241,136 @@ func TestCommitSearchUsesFTSRankingAndRepairsMissingIndex(t *testing.T) {
 	}
 	if len(rebuilt) != 1 || rebuilt[0].SHA != "aaa111" {
 		t.Fatalf("expected search to rebuild missing fts index, got %#v", rebuilt)
+	}
+}
+
+func TestContextSearchUsesFTSRankingAndRepairsMissingIndexes(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "aid.db")
+
+	sqliteStore, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	if err := sqliteStore.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	repo, err := sqliteStore.UpsertRepo(ctx, "/tmp/project", "project")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	if _, err := sqliteStore.AddNote(ctx, store.AddNoteInput{
+		RepoID: repo.ID,
+		Branch: "feature",
+		Scope:  store.ScopeBranch,
+		Text:   "Refresh retry path investigation",
+	}); err != nil {
+		t.Fatalf("add feature note: %v", err)
+	}
+	if _, err := sqliteStore.AddNote(ctx, store.AddNoteInput{
+		RepoID: repo.ID,
+		Branch: "main",
+		Scope:  store.ScopeBranch,
+		Text:   "Refresh retry fails after 401 retry",
+	}); err != nil {
+		t.Fatalf("add main note: %v", err)
+	}
+	if _, err := sqliteStore.AddNote(ctx, store.AddNoteInput{
+		RepoID: repo.ID,
+		Branch: "main",
+		Scope:  store.ScopeBranch,
+		Text:   "Refresh worker logging needs cleanup",
+	}); err != nil {
+		t.Fatalf("add weaker note: %v", err)
+	}
+
+	rationale := "Retry the refresh flow only once after a 401 response"
+	if _, err := sqliteStore.AddDecision(ctx, store.AddDecisionInput{
+		RepoID:    repo.ID,
+		Branch:    "main",
+		Text:      "Treat tokens as single-use",
+		Rationale: &rationale,
+	}); err != nil {
+		t.Fatalf("add decision with rationale: %v", err)
+	}
+	if _, err := sqliteStore.AddDecision(ctx, store.AddDecisionInput{
+		RepoID: repo.ID,
+		Branch: "main",
+		Text:   "Refresh policy housekeeping",
+	}); err != nil {
+		t.Fatalf("add weaker decision: %v", err)
+	}
+
+	if _, err := sqliteStore.AddHandoff(ctx, store.AddHandoffInput{
+		RepoID:  repo.ID,
+		Branch:  "main",
+		Summary: "Open questions:\n- Why does refresh retry fail after 401?",
+	}); err != nil {
+		t.Fatalf("add handoff: %v", err)
+	}
+	if _, err := sqliteStore.AddHandoff(ctx, store.AddHandoffInput{
+		RepoID:  repo.ID,
+		Branch:  "main",
+		Summary: "Billing handoff for VAT work",
+	}); err != nil {
+		t.Fatalf("add weaker handoff: %v", err)
+	}
+
+	if _, err := sqliteStore.db.ExecContext(ctx, `DELETE FROM notes_fts WHERE repo_id = ?`, repo.ID); err != nil {
+		t.Fatalf("clear note fts index: %v", err)
+	}
+
+	notes, err := sqliteStore.SearchNotes(ctx, repo.ID, "main", "refresh retry", 10)
+	if err != nil {
+		t.Fatalf("search notes: %v", err)
+	}
+	if len(notes) < 2 || notes[0].Text != "Refresh retry fails after 401 retry" {
+		t.Fatalf("expected note search to rank the main-branch exact match first, got %#v", notes)
+	}
+
+	decisions, err := sqliteStore.SearchDecisions(ctx, repo.ID, "main", "401 retry", 10)
+	if err != nil {
+		t.Fatalf("search decisions: %v", err)
+	}
+	if len(decisions) == 0 || decisions[0].Text != "Treat tokens as single-use" {
+		t.Fatalf("expected decision search to use indexed rationale text, got %#v", decisions)
+	}
+
+	handoffs, err := sqliteStore.SearchHandoffs(ctx, repo.ID, "main", "refresh retry", 10)
+	if err != nil {
+		t.Fatalf("search handoffs: %v", err)
+	}
+	if len(handoffs) == 0 || handoffs[0].Summary != "Open questions:\n- Why does refresh retry fail after 401?" {
+		t.Fatalf("expected handoff search to rank the matching handoff first, got %#v", handoffs)
+	}
+}
+
+func TestMigrateTracksSchemaVersion(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "aid.db")
+
+	sqliteStore, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	if err := sqliteStore.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := sqliteStore.Migrate(ctx); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+
+	var version int
+	if err := sqliteStore.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read schema version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("expected schema version %d, got %d", schemaVersion, version)
 	}
 }

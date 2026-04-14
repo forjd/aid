@@ -3,8 +3,8 @@ package resume
 import (
 	"sort"
 
-	"aid/internal/git"
-	"aid/internal/store"
+	"github.com/forjd/aid/internal/git"
+	"github.com/forjd/aid/internal/store"
 )
 
 type Bundle struct {
@@ -14,10 +14,12 @@ type Bundle struct {
 	Notes               []store.Note
 	Decisions           []store.Decision
 	RecentCommits       []git.Commit
+	LatestHandoff       *store.Handoff
+	OpenQuestions       []string
 	NextAction          *string
 }
 
-func Build(branch string, notes []store.Note, tasks []store.Task, decisions []store.Decision, commits []git.Commit) Bundle {
+func Build(branch string, notes []store.Note, tasks []store.Task, decisions []store.Decision, commits []git.Commit, latestHandoff *store.Handoff) Bundle {
 	activeTask, inferred, ambiguous := inferActiveTask(branch, tasks)
 
 	return Bundle{
@@ -27,7 +29,9 @@ func Build(branch string, notes []store.Note, tasks []store.Task, decisions []st
 		Notes:               rankNotes(branch, notes, 3),
 		Decisions:           rankDecisions(branch, decisions, 3),
 		RecentCommits:       limitCommits(commits, 5),
-		NextAction:          inferNextAction(activeTask, ambiguous),
+		LatestHandoff:       latestHandoff,
+		OpenQuestions:       inferOpenQuestions(branch, activeTask, ambiguous, tasks),
+		NextAction:          inferNextAction(branch, activeTask, ambiguous, tasks),
 	}
 }
 
@@ -151,15 +155,75 @@ func limitCommits(commits []git.Commit, limit int) []git.Commit {
 	return commits[:limit]
 }
 
-func inferNextAction(activeTask *store.Task, ambiguous bool) *string {
+func inferNextAction(branch string, activeTask *store.Task, ambiguous bool, tasks []store.Task) *string {
 	if activeTask != nil {
 		next := "continue " + activeTask.Text
+		return &next
+	}
+
+	if blocked := firstTask(branch, tasks, store.TaskBlocked, true); blocked != nil {
+		next := "resolve blocker for " + blocked.Text
 		return &next
 	}
 
 	if ambiguous {
 		next := "choose a single active task"
 		return &next
+	}
+
+	if open := firstTask(branch, tasks, store.TaskOpen, true); open != nil {
+		next := "start " + open.Text
+		return &next
+	}
+
+	if blocked := firstTask(branch, tasks, store.TaskBlocked, false); blocked != nil {
+		next := "resolve blocker for " + blocked.Text
+		return &next
+	}
+
+	if open := firstTask(branch, tasks, store.TaskOpen, false); open != nil {
+		next := "start " + open.Text
+		return &next
+	}
+
+	return nil
+}
+
+func inferOpenQuestions(branch string, activeTask *store.Task, ambiguous bool, tasks []store.Task) []string {
+	questions := make([]string, 0, 3)
+	if ambiguous {
+		questions = append(questions, "Which task should be the single active task on this branch?")
+	}
+
+	if activeTask == nil {
+		for _, task := range tasks {
+			if task.Status != store.TaskBlocked {
+				continue
+			}
+			if task.Branch != "" && task.Branch != branch {
+				continue
+			}
+			questions = append(questions, "What is blocking "+task.Text+"?")
+			if len(questions) == 3 {
+				break
+			}
+		}
+	}
+
+	return questions
+}
+
+func firstTask(branch string, tasks []store.Task, status store.TaskStatus, branchOnly bool) *store.Task {
+	for _, task := range tasks {
+		if task.Status != status {
+			continue
+		}
+		if branchOnly && task.Branch != branch {
+			continue
+		}
+
+		candidate := task
+		return &candidate
 	}
 
 	return nil

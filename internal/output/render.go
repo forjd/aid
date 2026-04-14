@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"aid/internal/git"
-	resumepkg "aid/internal/resume"
-	searchpkg "aid/internal/search"
-	"aid/internal/store"
+	"github.com/forjd/aid/internal/git"
+	resumepkg "github.com/forjd/aid/internal/resume"
+	searchpkg "github.com/forjd/aid/internal/search"
+	"github.com/forjd/aid/internal/store"
 )
 
 type Format string
@@ -60,6 +60,10 @@ type HandoffGenerateResult struct {
 
 type HistoryIndexResult struct {
 	Indexed int
+	Added   int
+	Updated int
+	Removed int
+	Mode    string
 }
 
 type HistorySearchResult struct {
@@ -283,6 +287,12 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 			activeTask = &task
 		}
 
+		var latestHandoff *handoffPayload
+		if result.Bundle.LatestHandoff != nil {
+			handoff := handoffModel(*result.Bundle.LatestHandoff)
+			latestHandoff = &handoff
+		}
+
 		notes := make([]notePayload, 0, len(result.Bundle.Notes))
 		for _, note := range result.Bundle.Notes {
 			notes = append(notes, noteModel(note))
@@ -314,7 +324,8 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 				Notes               []notePayload     `json:"notes"`
 				Decisions           []decisionPayload `json:"decisions"`
 				RecentCommits       []commitPayload   `json:"recent_commits"`
-				LatestHandoff       any               `json:"latest_handoff"`
+				LatestHandoff       *handoffPayload   `json:"latest_handoff"`
+				OpenQuestions       []string          `json:"open_questions"`
 				NextAction          *string           `json:"next_action"`
 			}{
 				Repo: struct {
@@ -332,7 +343,8 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 				Notes:               notes,
 				Decisions:           decisions,
 				RecentCommits:       commits,
-				LatestHandoff:       nil,
+				LatestHandoff:       latestHandoff,
+				OpenQuestions:       append([]string(nil), result.Bundle.OpenQuestions...),
 				NextAction:          result.Bundle.NextAction,
 			},
 			Error: nil,
@@ -384,6 +396,20 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 			}
 		}
 
+		if result.Bundle.LatestHandoff != nil {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Latest handoff:")
+			writeVerboseHandoff(w, handoffModel(*result.Bundle.LatestHandoff))
+		}
+
+		if len(result.Bundle.OpenQuestions) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Open questions:")
+			for _, question := range result.Bundle.OpenQuestions {
+				fmt.Fprintf(w, "- %s\n", question)
+			}
+		}
+
 		if result.Bundle.NextAction != nil {
 			fmt.Fprintln(w)
 			fmt.Fprintln(w, "Next action:")
@@ -426,6 +452,18 @@ func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
 		fmt.Fprintln(w, "Recent commits:")
 		for _, commit := range result.Bundle.RecentCommits {
 			fmt.Fprintf(w, "- %s %s\n", shortSHA(commit.SHA), commit.Summary)
+		}
+	}
+
+	if result.Bundle.LatestHandoff != nil {
+		fmt.Fprintln(w, "Latest handoff:")
+		fmt.Fprintf(w, "- %s%s %s\n", store.HandoffRef(result.Bundle.LatestHandoff.ID), branchSuffix(result.Bundle.LatestHandoff.Branch), previewLine(result.Bundle.LatestHandoff.Summary))
+	}
+
+	if len(result.Bundle.OpenQuestions) > 0 {
+		fmt.Fprintln(w, "Open questions:")
+		for _, question := range result.Bundle.OpenQuestions {
+			fmt.Fprintf(w, "- %s\n", question)
 		}
 	}
 
@@ -527,9 +565,17 @@ func RenderHistoryIndexed(w io.Writer, opts Options, result HistoryIndexResult) 
 			OK:            true,
 			Command:       "history index",
 			Data: struct {
-				Indexed int `json:"indexed"`
+				Indexed int    `json:"indexed"`
+				Added   int    `json:"added"`
+				Updated int    `json:"updated"`
+				Removed int    `json:"removed"`
+				Mode    string `json:"mode"`
 			}{
 				Indexed: result.Indexed,
+				Added:   result.Added,
+				Updated: result.Updated,
+				Removed: result.Removed,
+				Mode:    result.Mode,
 			},
 			Error: nil,
 		})
@@ -538,7 +584,10 @@ func RenderHistoryIndexed(w io.Writer, opts Options, result HistoryIndexResult) 
 	if opts.IsVerbose() {
 		fmt.Fprintln(w, "History index complete")
 		fmt.Fprintf(w, "Commits indexed: %d\n", result.Indexed)
-		fmt.Fprintln(w, "Mode: full replacement")
+		fmt.Fprintf(w, "Commits added: %d\n", result.Added)
+		fmt.Fprintf(w, "Commits updated: %d\n", result.Updated)
+		fmt.Fprintf(w, "Commits removed: %d\n", result.Removed)
+		fmt.Fprintf(w, "Mode: %s\n", result.Mode)
 		return nil
 	}
 

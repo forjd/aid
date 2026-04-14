@@ -100,9 +100,9 @@ skills/aid/             static skill package for compatible agents
 
 ## Project Status
 
-`aid` is early, but the core local-memory workflow is already usable end to end. The current implementation includes real storage, command help, working recall and history search, and a practical resume/handoff loop.
+`aid` is early, but the core local-memory workflow is already usable end to end. The current implementation includes real storage, config-driven defaults, FTS-backed recall across stored context, incremental history sync, and a practical resume/handoff loop.
 
-The current Go module path is the local-safe placeholder `module aid`. Rename it once the repository has a canonical remote path.
+The module path now matches the canonical repository path: `github.com/forjd/aid`.
 
 ## Documentation
 

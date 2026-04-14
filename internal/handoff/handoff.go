@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"aid/internal/git"
-	resumepkg "aid/internal/resume"
-	"aid/internal/store"
+	"github.com/forjd/aid/internal/git"
+	resumepkg "github.com/forjd/aid/internal/resume"
+	"github.com/forjd/aid/internal/store"
 )
 
 type Snapshot struct {
@@ -52,6 +52,14 @@ func Build(branch string, worktree git.WorktreeStatus, bundle resumepkg.Bundle, 
 		fmt.Fprintln(&b, "Recent commits:")
 		for _, commit := range bundle.RecentCommits {
 			fmt.Fprintf(&b, "- %s %s\n", shortSHA(commit.SHA), commit.Summary)
+		}
+	}
+
+	questions := handoffOpenQuestions(bundle.OpenQuestions, worktree)
+	if len(questions) > 0 {
+		fmt.Fprintln(&b, "Open questions:")
+		for _, question := range questions {
+			fmt.Fprintf(&b, "- %s\n", question)
 		}
 	}
 
@@ -102,4 +110,15 @@ func shortSHA(value string) string {
 	}
 
 	return value[:7]
+}
+
+func handoffOpenQuestions(bundleQuestions []string, worktree git.WorktreeStatus) []string {
+	questions := append([]string(nil), bundleQuestions...)
+	if worktree.Dirty {
+		questions = append(questions, "Should the current uncommitted changes be kept, finished, or discarded?")
+	}
+	if len(questions) <= 3 {
+		return questions
+	}
+	return questions[:3]
 }

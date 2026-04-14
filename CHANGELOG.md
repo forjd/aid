@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/forjd/aid/compare/v0.1.0...v0.1.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* trigger patch release after CI recovery ([206b0ff](https://github.com/forjd/aid/commit/206b0ff5d92798057c8ef37a1a6c03e70fe1c2c6))
+
 ## 0.1.0 (2026-04-14)
 
 

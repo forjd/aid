@@ -253,6 +253,80 @@ func TestGlobalRepoFlagAndJSONListOutput(t *testing.T) {
 	}
 }
 
+func TestResumeOutputsWorkingSummary(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("hello\n"))
+	runGit(t, repoDir, "add", "README.md")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: initial repo memory support")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "note", "add", "Token refresh bug occurs after 401 retry")
+	_ = runCLI(t, "task", "add", "Fix token refresh retry path")
+	_ = runCLI(t, "decide", "add", "Store money as integer pence")
+
+	briefResume := runCLI(t, "resume", "--brief")
+	for _, want := range []string{
+		"Branch: main",
+		"Task: Fix token refresh retry path",
+		"Token refresh bug occurs after 401 retry",
+		"Store money as integer pence",
+		"feat: initial repo memory support",
+	} {
+		if !strings.Contains(briefResume, want) {
+			t.Fatalf("expected resume output to contain %q\n\n%s", want, briefResume)
+		}
+	}
+
+	jsonResume := runCLI(t, "resume", "--json")
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			ActiveTask struct {
+				Text string `json:"text"`
+			} `json:"active_task"`
+			ActiveTaskInferred bool `json:"active_task_inferred"`
+			Notes              []struct {
+				Text string `json:"text"`
+			} `json:"notes"`
+			RecentCommits []struct {
+				Summary string `json:"summary"`
+			} `json:"recent_commits"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonResume), &payload); err != nil {
+		t.Fatalf("unmarshal resume json: %v\n%s", err, jsonResume)
+	}
+	if !payload.OK || payload.Command != "resume" || !payload.Data.ActiveTaskInferred {
+		t.Fatalf("unexpected resume payload: %#v", payload)
+	}
+	if payload.Data.ActiveTask.Text != "Fix token refresh retry path" {
+		t.Fatalf("unexpected active task: %#v", payload.Data.ActiveTask)
+	}
+	if len(payload.Data.Notes) == 0 || payload.Data.Notes[0].Text != "Token refresh bug occurs after 401 retry" {
+		t.Fatalf("unexpected notes payload: %#v", payload.Data.Notes)
+	}
+	if len(payload.Data.RecentCommits) == 0 || payload.Data.RecentCommits[0].Summary != "feat: initial repo memory support" {
+		t.Fatalf("unexpected commits payload: %#v", payload.Data.RecentCommits)
+	}
+}
+
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
 
@@ -279,5 +353,20 @@ func runGit(t *testing.T, cwd string, args ...string) {
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+}
+
+func runGitWithIdentity(t *testing.T, cwd string, args ...string) {
+	t.Helper()
+
+	prefixed := append([]string{"-c", "user.name=Test User", "-c", "user.email=test@example.com"}, args...)
+	runGit(t, cwd, prefixed...)
+}
+
+func writeFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file %s: %v", path, err)
 	}
 }

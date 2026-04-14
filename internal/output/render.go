@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 
+	"aid/internal/git"
+	resumepkg "aid/internal/resume"
 	"aid/internal/store"
 )
 
@@ -41,6 +43,13 @@ type StatusResult struct {
 	ConfigExists bool
 	Initialized  bool
 	Counts       store.StatusCounts
+}
+
+type ResumeResult struct {
+	RepoName string
+	RepoPath string
+	Branch   string
+	Bundle   resumepkg.Bundle
 }
 
 func (o Options) IsBrief() bool {
@@ -200,6 +209,114 @@ func RenderStatus(w io.Writer, opts Options, result StatusResult) error {
 	fmt.Fprintf(w, "  blocked: %d\n", result.Counts.Tasks.Blocked)
 	fmt.Fprintf(w, "  done: %d\n", result.Counts.Tasks.Done)
 	fmt.Fprintf(w, "Decisions: %d\n", result.Counts.Decisions)
+	return nil
+}
+
+func RenderResume(w io.Writer, opts Options, result ResumeResult) error {
+	if opts.IsJSON() {
+		var activeTask *taskPayload
+		if result.Bundle.ActiveTask != nil {
+			task := taskModel(*result.Bundle.ActiveTask)
+			activeTask = &task
+		}
+
+		notes := make([]notePayload, 0, len(result.Bundle.Notes))
+		for _, note := range result.Bundle.Notes {
+			notes = append(notes, noteModel(note))
+		}
+
+		decisions := make([]decisionPayload, 0, len(result.Bundle.Decisions))
+		for _, decision := range result.Bundle.Decisions {
+			decisions = append(decisions, decisionModel(decision))
+		}
+
+		commits := make([]commitPayload, 0, len(result.Bundle.RecentCommits))
+		for _, commit := range result.Bundle.RecentCommits {
+			commits = append(commits, commitModel(commit))
+		}
+
+		return writeJSON(w, envelope{
+			SchemaVersion: "1",
+			OK:            true,
+			Command:       "resume",
+			Data: struct {
+				Repo struct {
+					Name   string `json:"name"`
+					Path   string `json:"path"`
+					Branch string `json:"branch"`
+				} `json:"repo"`
+				ActiveTask          *taskPayload      `json:"active_task"`
+				ActiveTaskInferred  bool              `json:"active_task_inferred"`
+				ActiveTaskAmbiguous bool              `json:"active_task_ambiguous"`
+				Notes               []notePayload     `json:"notes"`
+				Decisions           []decisionPayload `json:"decisions"`
+				RecentCommits       []commitPayload   `json:"recent_commits"`
+				LatestHandoff       any               `json:"latest_handoff"`
+				NextAction          *string           `json:"next_action"`
+			}{
+				Repo: struct {
+					Name   string `json:"name"`
+					Path   string `json:"path"`
+					Branch string `json:"branch"`
+				}{
+					Name:   result.RepoName,
+					Path:   result.RepoPath,
+					Branch: result.Branch,
+				},
+				ActiveTask:          activeTask,
+				ActiveTaskInferred:  result.Bundle.ActiveTaskInferred,
+				ActiveTaskAmbiguous: result.Bundle.ActiveTaskAmbiguous,
+				Notes:               notes,
+				Decisions:           decisions,
+				RecentCommits:       commits,
+				LatestHandoff:       nil,
+				NextAction:          result.Bundle.NextAction,
+			},
+			Error: nil,
+		})
+	}
+
+	fmt.Fprintf(w, "Branch: %s\n", result.Branch)
+	if result.Bundle.ActiveTask != nil {
+		fmt.Fprintf(w, "Task: %s\n", result.Bundle.ActiveTask.Text)
+	} else if result.Bundle.ActiveTaskAmbiguous {
+		fmt.Fprintln(w, "Task: ambiguous")
+	}
+
+	if len(result.Bundle.Notes) > 0 {
+		fmt.Fprintln(w, "Notes:")
+		for _, note := range result.Bundle.Notes {
+			if opts.IsBrief() {
+				fmt.Fprintf(w, "- %s\n", note.Text)
+			} else {
+				fmt.Fprintf(w, "- %s%s\n", note.Text, branchSuffix(note.Branch))
+			}
+		}
+	}
+
+	if len(result.Bundle.Decisions) > 0 {
+		fmt.Fprintln(w, "Decisions:")
+		for _, decision := range result.Bundle.Decisions {
+			if opts.IsBrief() {
+				fmt.Fprintf(w, "- %s\n", decision.Text)
+			} else {
+				fmt.Fprintf(w, "- %s%s\n", decision.Text, branchSuffix(decision.Branch))
+			}
+		}
+	}
+
+	if len(result.Bundle.RecentCommits) > 0 {
+		fmt.Fprintln(w, "Recent commits:")
+		for _, commit := range result.Bundle.RecentCommits {
+			fmt.Fprintf(w, "- %s %s\n", shortSHA(commit.SHA), commit.Summary)
+		}
+	}
+
+	if result.Bundle.NextAction != nil {
+		fmt.Fprintln(w, "Next:")
+		fmt.Fprintf(w, "- %s\n", *result.Bundle.NextAction)
+	}
+
 	return nil
 }
 
@@ -454,6 +571,15 @@ type decisionPayload struct {
 	CreatedAt string  `json:"created_at"`
 }
 
+type commitPayload struct {
+	SHA          string   `json:"sha"`
+	Summary      string   `json:"summary"`
+	Message      string   `json:"message"`
+	Author       string   `json:"author"`
+	CommittedAt  string   `json:"committed_at"`
+	ChangedPaths []string `json:"changed_paths"`
+}
+
 func writeJSON(w io.Writer, value any) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
@@ -510,6 +636,17 @@ func decisionModel(decision store.Decision) decisionPayload {
 	}
 }
 
+func commitModel(commit git.Commit) commitPayload {
+	return commitPayload{
+		SHA:          commit.SHA,
+		Summary:      commit.Summary,
+		Message:      commit.Message,
+		Author:       commit.Author,
+		CommittedAt:  commit.CommittedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ChangedPaths: append([]string(nil), commit.ChangedPaths...),
+	}
+}
+
 func branchSuffix(branch string) string {
 	if branch == "" {
 		return ""
@@ -525,4 +662,12 @@ func nullableString(value string) *string {
 
 	copy := value
 	return &copy
+}
+
+func shortSHA(value string) string {
+	if len(value) <= 7 {
+		return value
+	}
+
+	return value[:7]
 }

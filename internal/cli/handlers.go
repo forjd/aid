@@ -8,7 +8,9 @@ import (
 
 	"aid/internal/app"
 	"aid/internal/config"
+	"aid/internal/git"
 	"aid/internal/output"
+	resumepkg "aid/internal/resume"
 	"aid/internal/store"
 	sqlitestore "aid/internal/store/sqlite"
 )
@@ -254,6 +256,47 @@ func statusCommand(args []string, streams Streams) error {
 	}
 
 	return output.RenderStatus(streams.Out, streams.Options, result)
+}
+
+func resumeCommand(args []string, streams Streams) error {
+	if len(args) > 0 {
+		return fmt.Errorf("resume does not accept arguments")
+	}
+
+	ctx := context.Background()
+	runtime, err := openInitializedRepo(ctx, streams)
+	if err != nil {
+		return err
+	}
+	defer runtime.close()
+
+	notes, err := runtime.store.ListNotes(ctx, runtime.repo.ID, 20)
+	if err != nil {
+		return err
+	}
+
+	tasks, err := runtime.store.ListTasks(ctx, runtime.repo.ID, 50)
+	if err != nil {
+		return err
+	}
+
+	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, 20)
+	if err != nil {
+		return err
+	}
+
+	commits, err := git.RecentCommits(runtime.env.RepoRoot, 5)
+	if err != nil {
+		return err
+	}
+
+	bundle := resumepkg.Build(runtime.env.Branch, notes, tasks, decisions, commits)
+	return output.RenderResume(streams.Out, streams.Options, output.ResumeResult{
+		RepoName: runtime.env.RepoName,
+		RepoPath: runtime.env.RepoRoot,
+		Branch:   runtime.env.Branch,
+		Bundle:   bundle,
+	})
 }
 
 func openStore(ctx context.Context, streams Streams) (app.Environment, *sqlitestore.Store, error) {

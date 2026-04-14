@@ -297,7 +297,7 @@ func rootCommand() *Command {
 		Children: []*Command{
 			command("init", "aid init", "init", "aid init [options]", "Initialise aid in the current repository", initCommand),
 			command("status", "aid status", "status", "aid status [options]", "Show repo memory status", statusCommand),
-			stubCommand("resume", "aid resume", "resume", "aid resume [options]", "Show a compact working summary"),
+			command("resume", "aid resume", "resume", "aid resume [options]", "Show a compact working summary", resumeCommand),
 			stubCommand("recall", "aid recall", "recall <query>", "aid recall <query> [options]", "Search notes, decisions, handoffs, and commits"),
 			note,
 			task,

@@ -414,6 +414,7 @@ func TestResumeOutputsWorkingSummary(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("hello\n"))
 	runGit(t, repoDir, "add", "README.md")
 	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: initial repo memory support")
+	branch := currentGitBranch(t, repoDir)
 
 	previousWD, err := os.Getwd()
 	if err != nil {
@@ -435,7 +436,7 @@ func TestResumeOutputsWorkingSummary(t *testing.T) {
 
 	briefResume := runCLI(t, "resume", "--brief")
 	for _, want := range []string{
-		"Branch: main",
+		"Branch: " + branch,
 		"Task: Fix token refresh retry path",
 		"Token refresh bug occurs after 401 retry",
 		"Store money as integer pence",
@@ -549,6 +550,7 @@ func TestHandoffGenerateAndList(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("hello\n"))
 	runGit(t, repoDir, "add", "README.md")
 	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: initial repo memory support")
+	branch := currentGitBranch(t, repoDir)
 	writeFile(t, filepath.Join(repoDir, "NOTES.txt"), []byte("dirty tree\n"))
 
 	previousWD, err := os.Getwd()
@@ -571,7 +573,7 @@ func TestHandoffGenerateAndList(t *testing.T) {
 
 	generateOut := runCLI(t, "handoff", "generate", "--brief")
 	for _, want := range []string{
-		"Branch: main",
+		"Branch: " + branch,
 		"Worktree: dirty",
 		"Open tasks:",
 		"Recent notes:",
@@ -816,11 +818,12 @@ func TestHistoryIndexPrunesCommitsNoLongerReachable(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("base\n"))
 	runGit(t, repoDir, "add", "README.md")
 	runGitWithIdentity(t, repoDir, "commit", "-m", "chore: base commit")
+	baseBranch := currentGitBranch(t, repoDir)
 	runGit(t, repoDir, "checkout", "-q", "-b", "feature/refresh")
 	writeFile(t, filepath.Join(repoDir, "branch_only.txt"), []byte("refresh branch\n"))
 	runGit(t, repoDir, "add", "branch_only.txt")
 	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: branch-only refresh work")
-	runGit(t, repoDir, "checkout", "-q", "main")
+	runGit(t, repoDir, "checkout", "-q", baseBranch)
 
 	previousWD, err := os.Getwd()
 	if err != nil {
@@ -1200,6 +1203,25 @@ func runGitWithIdentity(t *testing.T, cwd string, args ...string) {
 
 	prefixed := append([]string{"-c", "user.name=Test User", "-c", "user.email=test@example.com"}, args...)
 	runGit(t, cwd, prefixed...)
+}
+
+func currentGitBranch(t *testing.T, cwd string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = cwd
+
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git branch --show-current failed: %v", err)
+	}
+
+	branch := strings.TrimSpace(string(output))
+	if branch == "" {
+		t.Fatal("expected current git branch to be non-empty")
+	}
+
+	return branch
 }
 
 func writeFile(t *testing.T, path string, data []byte) {

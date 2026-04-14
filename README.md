@@ -71,6 +71,7 @@ The Go module currently uses `module aid` as a local-safe placeholder. Rename it
 
 ## Documentation
 
+- [MVP status](docs/mvp-status.md)
 - [MVP spec](docs/spec/mvp.md)
 - [Architecture notes](docs/architecture.md)
 - [Agent skill package](skills/aid/SKILL.md)
@@ -88,3 +89,5 @@ Use it for:
 - links to the deeper docs
 
 Do not use it as the full product spec. That content belongs in `docs/spec/mvp.md`, where it can grow without turning the repo homepage into a wall of text.
+
+If you are resuming implementation work, start with `docs/mvp-status.md`.

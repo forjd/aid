@@ -31,7 +31,7 @@ jobs:
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" tap
           git -C tap checkout "$TAP_BRANCH"
           brew tap "$TAP_NAME" "$PWD/tap"
-          echo "TAP_REPOSITORY_PATH=$(brew --repository \"$TAP_NAME\")" >> "$GITHUB_ENV"
+          echo "TAP_REPOSITORY_PATH=$(brew --repository "$TAP_NAME")" >> "$GITHUB_ENV"
 
       - name: Render formula for release
         env:

@@ -39,17 +39,23 @@ type AgentConfig struct {
 
 func EnsureRepoConfig(path string) (bool, error) {
 	if _, err := os.Stat(path); err == nil {
+		if err := repairRepoConfigPermissions(path); err != nil {
+			return false, err
+		}
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("stat repo config: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return false, fmt.Errorf("create repo config directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(DefaultRepoConfig), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(DefaultRepoConfig), 0o600); err != nil {
 		return false, fmt.Errorf("write repo config: %w", err)
+	}
+	if err := repairRepoConfigPermissions(path); err != nil {
+		return false, err
 	}
 
 	return true, nil

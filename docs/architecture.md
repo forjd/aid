@@ -21,7 +21,7 @@ The repo should optimise for:
 - `internal/store`: storage interfaces and repository-facing persistence contracts
 - `internal/store/sqlite`: schema management and SQLite-backed persistence
 - `internal/git`: Git repo inspection, branch lookup, and commit enumeration
-- `internal/history`: commit indexing workflow and history search orchestration
+- `internal/history`: commit indexing workflow orchestration
 - `internal/search`: ranking and retrieval across memory objects
 - `internal/resume`: assembly of the compact resume bundle
 - `internal/handoff`: handoff generation and persistence
@@ -34,7 +34,7 @@ The dependency rule is simple:
 - `cmd/aid` imports `internal/cli`
 - `internal/cli` coordinates application packages
 - storage and Git packages return plain data, not formatted terminal strings
-- `internal/output` renders plain data into terminal or JSON output
+- `internal/output` renders plain data and output-specific DTOs into terminal or JSON output
 
 Avoid turning `aid` into a library-first design. This is an application, not a reusable SDK, so `internal/` should be the default.
 
@@ -58,4 +58,3 @@ Adding `pkg/` now would suggest a reusable library boundary that the project doe
 Use `README.md` as the contributor-facing homepage.
 
 Put longer, decision-heavy product material in `docs/spec/` so the entrypoint stays easy to scan.
-

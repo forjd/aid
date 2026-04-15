@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -172,11 +173,41 @@ func TestParseCommitsRejectsInvalidInput(t *testing.T) {
 	if _, err := parseCommits([]byte("path/without/header.go"), 1); err == nil {
 		t.Fatalf("expected path without header error")
 	}
-	if _, err := parseCommits([]byte("bad\x1fheader"), 1); err == nil {
+	if _, err := parseCommits([]byte("\x00bad"), 1); err == nil {
 		t.Fatalf("expected malformed header error")
 	}
-	if _, err := parseCommits([]byte("abc\x1fDan\x1fnot-a-time\x1fsummary"), 1); err == nil {
+	if _, err := parseCommits([]byte("\x00abc\x00Dan\x00not-a-time\x00summary"), 1); err == nil {
 		t.Fatalf("expected invalid time error")
+	}
+}
+
+func TestParseCommitsHandlesNULTokensAndPathsWithSpaces(t *testing.T) {
+	output := bytes.Join([][]byte{
+		{},
+		[]byte("abc123"),
+		[]byte("Dan"),
+		[]byte("2026-04-15T12:00:00Z"),
+		[]byte("fix: retry path"),
+		[]byte("\ninternal/app/env.go"),
+		[]byte("\ntwo words.txt"),
+	}, []byte{0})
+
+	commits, err := parseCommits(output, 1)
+	if err != nil {
+		t.Fatalf("parse commits: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("expected one commit, got %#v", commits)
+	}
+	if len(commits[0].ChangedPaths) != 2 || commits[0].ChangedPaths[1] != "two words.txt" {
+		t.Fatalf("unexpected changed paths: %#v", commits[0].ChangedPaths)
+	}
+}
+
+func TestRunGitOutputReturnsExitMessage(t *testing.T) {
+	_, err := runGitOutput("-C", t.TempDir(), "not-a-real-git-command")
+	if err == nil || !strings.Contains(err.Error(), "not-a-real-git-command") {
+		t.Fatalf("expected git error message, got %v", err)
 	}
 }
 

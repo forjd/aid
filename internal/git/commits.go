@@ -1,7 +1,6 @@
 package git
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -20,7 +19,7 @@ type Commit struct {
 }
 
 const (
-	commitLogFormat = "--format=%H%x1f%an%x1f%aI%x1f%s"
+	commitLogFormat = "--format=%x00%H%x00%an%x00%aI%x00%s"
 	commitBatchSize = 256
 )
 
@@ -33,7 +32,7 @@ func Commits(startDir string, limit int) ([]Commit, error) {
 	if limit > 0 {
 		args = append(args, fmt.Sprintf("-%d", limit))
 	}
-	args = append(args, commitLogFormat, "--name-only")
+	args = append(args, commitLogFormat, "--name-only", "-z")
 
 	output, err := runGitOutput(args...)
 	if err != nil {
@@ -79,7 +78,7 @@ func CommitsBySHA(startDir string, shas []string) ([]Commit, error) {
 			end = len(shas)
 		}
 
-		args := []string{"-C", startDir, "log", "--no-walk=sorted", commitLogFormat, "--name-only"}
+		args := []string{"-C", startDir, "log", "--no-walk=sorted", commitLogFormat, "--name-only", "-z"}
 		args = append(args, shas[start:end]...)
 
 		output, err := runGitOutput(args...)
@@ -98,8 +97,7 @@ func CommitsBySHA(startDir string, shas []string) ([]Commit, error) {
 }
 
 func parseCommits(output []byte, limit int) ([]Commit, error) {
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" {
+	if len(bytes.TrimSpace(output)) == 0 {
 		return nil, nil
 	}
 
@@ -108,46 +106,43 @@ func parseCommits(output []byte, limit int) ([]Commit, error) {
 		capHint = 32
 	}
 	commits := make([]Commit, 0, capHint)
-	var current *Commit
-
-	scanner := bufio.NewScanner(strings.NewReader(trimmed))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		if strings.Contains(line, "\x1f") {
-			header := strings.Split(line, "\x1f")
-			if len(header) != 4 {
-				return nil, fmt.Errorf("unexpected git log header %q", line)
+	tokens := bytes.Split(output, []byte{0})
+	for i := 0; i < len(tokens); {
+		if len(tokens[i]) == 0 {
+			i++
+			if i >= len(tokens) {
+				break
+			}
+			if i+3 >= len(tokens) {
+				return nil, fmt.Errorf("unexpected git log header %q", string(bytes.Join(tokens[i:], []byte{0})))
 			}
 
-			committedAt, err := time.Parse(time.RFC3339, header[2])
+			committedAt, err := time.Parse(time.RFC3339, string(tokens[i+2]))
 			if err != nil {
 				return nil, fmt.Errorf("parse commit time: %w", err)
 			}
 
 			commits = append(commits, Commit{
-				SHA:         header[0],
-				Summary:     header[3],
-				Message:     header[3],
-				Author:      header[1],
+				SHA:         string(tokens[i]),
+				Summary:     string(tokens[i+3]),
+				Message:     string(tokens[i+3]),
+				Author:      string(tokens[i+1]),
 				CommittedAt: committedAt.UTC(),
 			})
-			current = &commits[len(commits)-1]
+			current := &commits[len(commits)-1]
+			i += 4
+
+			for i < len(tokens) && len(tokens[i]) != 0 {
+				path := strings.TrimSpace(string(tokens[i]))
+				if path != "" {
+					current.ChangedPaths = append(current.ChangedPaths, path)
+				}
+				i++
+			}
 			continue
 		}
 
-		if current == nil {
-			return nil, fmt.Errorf("unexpected git log path without header %q", line)
-		}
-
-		current.ChangedPaths = append(current.ChangedPaths, line)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan git log output: %w", err)
+		return nil, fmt.Errorf("unexpected git log path without header %q", string(tokens[i]))
 	}
 
 	return commits, nil

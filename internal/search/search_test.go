@@ -28,7 +28,7 @@ func TestBuildAppliesPackageLimits(t *testing.T) {
 		}
 	}
 
-	result := Build("refresh retry", "main", notes, decisions, handoffs, commits)
+	result := Build("refresh retry", notes, decisions, handoffs, commits)
 
 	if result.Query != "refresh retry" {
 		t.Fatalf("unexpected query: %q", result.Query)
@@ -47,22 +47,34 @@ func TestBuildAppliesPackageLimits(t *testing.T) {
 	}
 }
 
-func TestLimitHelpersPassThroughShortSlices(t *testing.T) {
-	note := []store.Note{{Text: "note"}}
-	decision := []store.Decision{{Text: "decision"}}
-	handoff := []store.Handoff{{Summary: "handoff"}}
-	commit := []store.Commit{{SHA: "abc123"}}
+func TestBuildPreservesShortSlicesAndOrder(t *testing.T) {
+	notes := []store.Note{{Text: "note-1"}, {Text: "note-2"}}
+	decisions := []store.Decision{{Text: "decision-1"}}
+	handoffs := []store.Handoff{{Summary: "handoff-1"}}
+	commits := []store.Commit{{SHA: "abc123"}, {SHA: "def456"}}
 
-	if got := limitNotes(note, 5); len(got) != 1 || got[0].Text != "note" {
-		t.Fatalf("unexpected limited notes: %#v", got)
+	result := Build("refresh", notes, decisions, handoffs, commits)
+
+	if len(result.Notes) != 2 || result.Notes[1].Text != "note-2" {
+		t.Fatalf("unexpected notes: %#v", result.Notes)
 	}
-	if got := limitDecisions(decision, 5); len(got) != 1 || got[0].Text != "decision" {
-		t.Fatalf("unexpected limited decisions: %#v", got)
+	if len(result.Decisions) != 1 || result.Decisions[0].Text != "decision-1" {
+		t.Fatalf("unexpected decisions: %#v", result.Decisions)
 	}
-	if got := limitHandoffs(handoff, 3); len(got) != 1 || got[0].Summary != "handoff" {
-		t.Fatalf("unexpected limited handoffs: %#v", got)
+	if len(result.Handoffs) != 1 || result.Handoffs[0].Summary != "handoff-1" {
+		t.Fatalf("unexpected handoffs: %#v", result.Handoffs)
 	}
-	if got := limitCommits(commit, 5); len(got) != 1 || got[0].SHA != "abc123" {
-		t.Fatalf("unexpected limited commits: %#v", got)
+	if len(result.Commits) != 2 || result.Commits[1].SHA != "def456" {
+		t.Fatalf("unexpected commits: %#v", result.Commits)
+	}
+}
+
+func TestBuildHandlesEmptyInputs(t *testing.T) {
+	result := Build("refresh", nil, nil, nil, nil)
+	if result.Query != "refresh" {
+		t.Fatalf("unexpected query: %q", result.Query)
+	}
+	if len(result.Notes) != 0 || len(result.Decisions) != 0 || len(result.Handoffs) != 0 || len(result.Commits) != 0 {
+		t.Fatalf("expected empty sections, got %#v", result)
 	}
 }

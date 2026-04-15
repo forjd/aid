@@ -259,6 +259,124 @@ func TestSyncCommitsDeduplicatesRepeatedSHAs(t *testing.T) {
 	}
 }
 
+func TestSearchIgnoresPunctuationOnlyQueries(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := openTestStore(t)
+	defer sqliteStore.Close()
+
+	repo, err := sqliteStore.UpsertRepo(ctx, "/tmp/project", "project")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	if _, err := sqliteStore.AddNote(ctx, store.AddNoteInput{
+		RepoID: repo.ID,
+		Scope:  store.ScopeRepo,
+		Text:   "refresh retry note",
+	}); err != nil {
+		t.Fatalf("add note: %v", err)
+	}
+
+	for _, query := range []string{":-)", "!!!"} {
+		notes, err := sqliteStore.SearchNotes(ctx, repo.ID, "main", query, 10)
+		if err != nil {
+			t.Fatalf("search notes for %q: %v", query, err)
+		}
+		if len(notes) != 0 {
+			t.Fatalf("expected no notes for punctuation-only query %q, got %#v", query, notes)
+		}
+
+		decisions, err := sqliteStore.SearchDecisions(ctx, repo.ID, "main", query, 10)
+		if err != nil {
+			t.Fatalf("search decisions for %q: %v", query, err)
+		}
+		if len(decisions) != 0 {
+			t.Fatalf("expected no decisions for punctuation-only query %q, got %#v", query, decisions)
+		}
+
+		handoffs, err := sqliteStore.SearchHandoffs(ctx, repo.ID, "main", query, 10)
+		if err != nil {
+			t.Fatalf("search handoffs for %q: %v", query, err)
+		}
+		if len(handoffs) != 0 {
+			t.Fatalf("expected no handoffs for punctuation-only query %q, got %#v", query, handoffs)
+		}
+
+		commits, err := sqliteStore.SearchCommits(ctx, repo.ID, query, 10)
+		if err != nil {
+			t.Fatalf("search commits for %q: %v", query, err)
+		}
+		if len(commits) != 0 {
+			t.Fatalf("expected no commits for punctuation-only query %q, got %#v", query, commits)
+		}
+	}
+}
+
+func TestSearchHandlesUnicodeQueries(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := openTestStore(t)
+	defer sqliteStore.Close()
+
+	repo, err := sqliteStore.UpsertRepo(ctx, "/tmp/project", "project")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	if _, err := sqliteStore.AddNote(ctx, store.AddNoteInput{
+		RepoID: repo.ID,
+		Scope:  store.ScopeRepo,
+		Text:   "café retry investigation",
+	}); err != nil {
+		t.Fatalf("add unicode note: %v", err)
+	}
+	if _, err := sqliteStore.AddDecision(ctx, store.AddDecisionInput{
+		RepoID: repo.ID,
+		Text:   "keep café token refresh simple",
+	}); err != nil {
+		t.Fatalf("add unicode decision: %v", err)
+	}
+	if _, err := sqliteStore.AddHandoff(ctx, store.AddHandoffInput{
+		RepoID:  repo.ID,
+		Summary: "Follow up on café retry failure",
+	}); err != nil {
+		t.Fatalf("add unicode handoff: %v", err)
+	}
+	indexedAt := time.Date(2026, time.April, 15, 12, 0, 0, 0, time.UTC)
+	if err := sqliteStore.ReplaceCommits(ctx, store.ReplaceCommitsInput{
+		RepoID:    repo.ID,
+		IndexedAt: indexedAt,
+		Commits: []store.Commit{
+			{
+				SHA:          "cafe123",
+				Author:       "Dan",
+				CommittedAt:  indexedAt,
+				Message:      "fix: café retry path",
+				Summary:      "fix: café retry path",
+				ChangedPaths: []string{"auth/cafe.go"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace unicode commits: %v", err)
+	}
+
+	notes, err := sqliteStore.SearchNotes(ctx, repo.ID, "main", "café", 10)
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("unexpected unicode note search result: %#v, err=%v", notes, err)
+	}
+	decisions, err := sqliteStore.SearchDecisions(ctx, repo.ID, "main", "café", 10)
+	if err != nil || len(decisions) != 1 {
+		t.Fatalf("unexpected unicode decision search result: %#v, err=%v", decisions, err)
+	}
+	handoffs, err := sqliteStore.SearchHandoffs(ctx, repo.ID, "main", "café", 10)
+	if err != nil || len(handoffs) != 1 {
+		t.Fatalf("unexpected unicode handoff search result: %#v, err=%v", handoffs, err)
+	}
+	commits, err := sqliteStore.SearchCommits(ctx, repo.ID, "café", 10)
+	if err != nil || len(commits) != 1 {
+		t.Fatalf("unexpected unicode commit search result: %#v, err=%v", commits, err)
+	}
+}
+
 func TestDecisionAndHandoffSearchRepairMissingFTSIndexes(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := openTestStore(t)

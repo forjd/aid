@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/forjd/aid/internal/git"
 	"github.com/forjd/aid/internal/output"
 	"github.com/forjd/aid/internal/store"
 )
@@ -205,7 +204,7 @@ func TestStubCommandWritesScaffoldMessage(t *testing.T) {
 	}
 }
 
-func TestJoinArgsAndFilterIndexedCommits(t *testing.T) {
+func TestJoinArgs(t *testing.T) {
 	text, err := joinArgs([]string{"refresh", "retry"}, "query")
 	if err != nil {
 		t.Fatalf("join args: %v", err)
@@ -215,22 +214,6 @@ func TestJoinArgsAndFilterIndexedCommits(t *testing.T) {
 	}
 	if _, err := joinArgs([]string{" ", "\t"}, "query"); err == nil {
 		t.Fatalf("expected missing query error")
-	}
-
-	commits := []git.Commit{
-		{SHA: "keep", ChangedPaths: []string{"internal/app/env.go", "vendor/deps.txt"}},
-		{SHA: "drop", ChangedPaths: []string{"vendor/deps.txt"}},
-		{SHA: "empty"},
-	}
-	filtered := filterIndexedCommits(commits, []string{"vendor/"})
-	if len(filtered) != 2 {
-		t.Fatalf("expected two commits after filtering, got %#v", filtered)
-	}
-	if filtered[0].SHA != "keep" || len(filtered[0].ChangedPaths) != 1 || filtered[0].ChangedPaths[0] != "internal/app/env.go" {
-		t.Fatalf("unexpected kept commit: %#v", filtered[0])
-	}
-	if filtered[1].SHA != "empty" {
-		t.Fatalf("expected commit without paths to be kept, got %#v", filtered[1])
 	}
 }
 

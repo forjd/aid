@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -41,7 +42,7 @@ func Build(branch string, notes []store.Note, tasks []store.Task, decisions []st
 		ActiveTaskAmbiguous: ambiguous,
 		Notes:               rankNotes(branch, notes, 3),
 		Decisions:           rankDecisions(branch, decisions, 3),
-		RecentCommits:       limitCommits(commits, 5),
+		RecentCommits:       store.Limit(commits, 5),
 		LatestHandoff:       latestHandoff,
 		OpenQuestions:       openQuestions,
 		NextAction:          nextAction,
@@ -89,7 +90,7 @@ func inferActiveTask(branch string, tasks []store.Task) (*store.Task, bool, bool
 }
 
 func rankNotes(branch string, notes []store.Note, limit int) []store.Note {
-	cloned := append([]store.Note(nil), notes...)
+	cloned := slices.Clone(notes)
 	sort.SliceStable(cloned, func(i, j int) bool {
 		leftRank := branchRank(branch, cloned[i].Branch)
 		rightRank := branchRank(branch, cloned[j].Branch)
@@ -104,11 +105,11 @@ func rankNotes(branch string, notes []store.Note, limit int) []store.Note {
 		return cloned[i].ID > cloned[j].ID
 	})
 
-	return limitNotes(cloned, limit)
+	return store.Limit(cloned, limit)
 }
 
 func rankDecisions(branch string, decisions []store.Decision, limit int) []store.Decision {
-	cloned := append([]store.Decision(nil), decisions...)
+	cloned := slices.Clone(decisions)
 	sort.SliceStable(cloned, func(i, j int) bool {
 		leftRank := branchRank(branch, cloned[i].Branch)
 		rightRank := branchRank(branch, cloned[j].Branch)
@@ -123,7 +124,7 @@ func rankDecisions(branch string, decisions []store.Decision, limit int) []store
 		return cloned[i].ID > cloned[j].ID
 	})
 
-	return limitDecisions(cloned, limit)
+	return store.Limit(cloned, limit)
 }
 
 func branchRank(currentBranch string, itemBranch string) int {
@@ -145,27 +146,6 @@ func filterTasks(tasks []store.Task, predicate func(store.Task) bool) []store.Ta
 		}
 	}
 	return result
-}
-
-func limitNotes(notes []store.Note, limit int) []store.Note {
-	if len(notes) <= limit {
-		return notes
-	}
-	return notes[:limit]
-}
-
-func limitDecisions(decisions []store.Decision, limit int) []store.Decision {
-	if len(decisions) <= limit {
-		return decisions
-	}
-	return decisions[:limit]
-}
-
-func limitCommits(commits []store.Commit, limit int) []store.Commit {
-	if len(commits) <= limit {
-		return commits
-	}
-	return commits[:limit]
 }
 
 func inferNextAction(branch string, activeTask *store.Task, ambiguous bool, tasks []store.Task) *string {
@@ -243,7 +223,7 @@ func firstTask(branch string, tasks []store.Task, status store.TaskStatus, branc
 }
 
 func rankHandoffs(branch string, handoffs []store.Handoff, limit int) []store.Handoff {
-	cloned := append([]store.Handoff(nil), handoffs...)
+	cloned := slices.Clone(handoffs)
 	sort.SliceStable(cloned, func(i, j int) bool {
 		leftRank := branchRank(branch, cloned[i].Branch)
 		rightRank := branchRank(branch, cloned[j].Branch)
@@ -258,10 +238,7 @@ func rankHandoffs(branch string, handoffs []store.Handoff, limit int) []store.Ha
 		return cloned[i].ID > cloned[j].ID
 	})
 
-	if len(cloned) <= limit {
-		return cloned
-	}
-	return cloned[:limit]
+	return store.Limit(cloned, limit)
 }
 
 func appendCarryForwardQuestions(current []string, handoffs []store.Handoff) []string {

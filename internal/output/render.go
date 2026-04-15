@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	resumepkg "github.com/forjd/aid/internal/resume"
-	searchpkg "github.com/forjd/aid/internal/search"
 	"github.com/forjd/aid/internal/store"
 )
 
@@ -46,11 +44,23 @@ type StatusResult struct {
 	Counts       store.StatusCounts
 }
 
+type ResumeBundle struct {
+	ActiveTask          *store.Task
+	ActiveTaskInferred  bool
+	ActiveTaskAmbiguous bool
+	Notes               []store.Note
+	Decisions           []store.Decision
+	RecentCommits       []store.Commit
+	LatestHandoff       *store.Handoff
+	OpenQuestions       []string
+	NextAction          *string
+}
+
 type ResumeResult struct {
 	RepoName string
 	RepoPath string
 	Branch   string
-	Bundle   resumepkg.Bundle
+	Bundle   ResumeBundle
 }
 
 type HandoffGenerateResult struct {
@@ -70,8 +80,16 @@ type HistorySearchResult struct {
 	Commits []store.Commit
 }
 
+type RecallData struct {
+	Query     string
+	Notes     []store.Note
+	Decisions []store.Decision
+	Handoffs  []store.Handoff
+	Commits   []store.Commit
+}
+
 type RecallResult struct {
-	Result searchpkg.Result
+	Result RecallData
 }
 
 func (o Options) IsBrief() bool {

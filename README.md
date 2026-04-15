@@ -66,7 +66,9 @@ Install a specific release:
 curl -fsSL https://raw.githubusercontent.com/forjd/aid/main/scripts/install.sh | sh -s -- -v v0.1.0
 ```
 
-The installer downloads the matching GitHub Release asset, verifies it against `checksums.txt`, and installs `aid` into `~/.local/bin` by default.
+The installer downloads the matching GitHub Release asset, verifies it against `checksums.txt` from the same GitHub release, and installs `aid` into `~/.local/bin` by default.
+
+That protects against download corruption and asset mismatch, but it is not signature-based publisher verification.
 
 If you prefer a manual install, download the right asset from GitHub Releases:
 

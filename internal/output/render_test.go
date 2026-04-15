@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	resumepkg "github.com/forjd/aid/internal/resume"
-	searchpkg "github.com/forjd/aid/internal/search"
 	"github.com/forjd/aid/internal/store"
 )
 
@@ -251,7 +249,7 @@ func TestRenderResume(t *testing.T) {
 		RepoName: "aid",
 		RepoPath: "/tmp/aid",
 		Branch:   "main",
-		Bundle: resumepkg.Bundle{
+		Bundle: ResumeBundle{
 			ActiveTask: sampleResumeTaskPointer(),
 			Notes: []store.Note{
 				sampleNote(),
@@ -659,13 +657,13 @@ func TestRenderHistorySearch(t *testing.T) {
 
 func TestRenderRecall(t *testing.T) {
 	empty := renderString(t, func(w io.Writer) error {
-		return RenderRecall(w, Options{}, RecallResult{Result: searchpkg.Result{Query: "refresh"}})
+		return RenderRecall(w, Options{}, RecallResult{Result: RecallData{Query: "refresh"}})
 	})
 	if empty != "No matching context.\n" {
 		t.Fatalf("unexpected empty recall output:\n%s", empty)
 	}
 
-	result := RecallResult{Result: searchpkg.Result{
+	result := RecallResult{Result: RecallData{
 		Query:     "refresh",
 		Notes:     []store.Note{sampleNote()},
 		Decisions: []store.Decision{sampleDecision()},

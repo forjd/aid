@@ -17,7 +17,8 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 const schemaVersion = 4
@@ -164,7 +165,7 @@ var migrations = [][]string{
 }
 
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create app data directory: %w", err)
 	}
 
@@ -175,8 +176,12 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	store := &Store{db: db}
+	store := &Store{db: db, path: path}
 	if err := store.configure(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.repairPermissions(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -246,6 +251,17 @@ func (s *Store) Migrate(ctx context.Context) error {
 		version++
 	}
 
+	if err := s.repairPermissions(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) repairPermissions() error {
+	if err := repairDBPermissions(s.path); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -10,40 +10,12 @@ type Result struct {
 	Commits   []store.Commit
 }
 
-func Build(query string, _ string, notes []store.Note, decisions []store.Decision, handoffs []store.Handoff, commits []store.Commit) Result {
+func Build(query string, notes []store.Note, decisions []store.Decision, handoffs []store.Handoff, commits []store.Commit) Result {
 	return Result{
 		Query:     query,
-		Notes:     limitNotes(notes, 5),
-		Decisions: limitDecisions(decisions, 5),
-		Handoffs:  limitHandoffs(handoffs, 3),
-		Commits:   limitCommits(commits, 5),
+		Notes:     store.Limit(notes, 5),
+		Decisions: store.Limit(decisions, 5),
+		Handoffs:  store.Limit(handoffs, 3),
+		Commits:   store.Limit(commits, 5),
 	}
-}
-
-func limitNotes(notes []store.Note, limit int) []store.Note {
-	if len(notes) <= limit {
-		return notes
-	}
-	return notes[:limit]
-}
-
-func limitDecisions(decisions []store.Decision, limit int) []store.Decision {
-	if len(decisions) <= limit {
-		return decisions
-	}
-	return decisions[:limit]
-}
-
-func limitHandoffs(handoffs []store.Handoff, limit int) []store.Handoff {
-	if len(handoffs) <= limit {
-		return handoffs
-	}
-	return handoffs[:limit]
-}
-
-func limitCommits(commits []store.Commit, limit int) []store.Commit {
-	if len(commits) <= limit {
-		return commits
-	}
-	return commits[:limit]
 }

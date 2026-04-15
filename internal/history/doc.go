@@ -1,2 +1,2 @@
-// Package history orchestrates commit indexing and history lookups.
+// Package history orchestrates commit indexing workflows for repo history.
 package history

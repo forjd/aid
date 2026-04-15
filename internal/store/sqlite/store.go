@@ -172,6 +172,8 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	store := &Store{db: db}
 	if err := store.configure(); err != nil {
@@ -188,15 +190,26 @@ func (s *Store) Close() error {
 
 func (s *Store) configure() error {
 	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA journal_mode = WAL",
 		"PRAGMA busy_timeout = 5000",
+		"PRAGMA foreign_keys = ON",
 	}
 
 	for _, pragma := range pragmas {
 		if _, err := s.db.Exec(pragma); err != nil {
 			return fmt.Errorf("configure sqlite: %w", err)
 		}
+	}
+
+	var journalMode string
+	if err := s.db.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		return fmt.Errorf("read sqlite journal mode: %w", err)
+	}
+	if strings.EqualFold(journalMode, "wal") {
+		return nil
+	}
+
+	if _, err := s.db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		return fmt.Errorf("configure sqlite journal mode: %w", err)
 	}
 
 	return nil

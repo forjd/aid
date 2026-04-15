@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -396,5 +398,129 @@ func TestMigrateTracksSchemaVersion(t *testing.T) {
 	}
 	if version != schemaVersion {
 		t.Fatalf("expected schema version %d, got %d", schemaVersion, version)
+	}
+}
+
+func TestSeparateStoreInstancesHandleConcurrentRecallLikeReads(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "aid.db")
+
+	seedStore, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open seed store: %v", err)
+	}
+	defer seedStore.Close()
+
+	if err := seedStore.Migrate(ctx); err != nil {
+		t.Fatalf("migrate seed store: %v", err)
+	}
+
+	repo, err := seedStore.UpsertRepo(ctx, "/tmp/project", "project")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	if _, err := seedStore.AddNote(ctx, store.AddNoteInput{
+		RepoID: repo.ID,
+		Branch: "main",
+		Scope:  store.ScopeBranch,
+		Text:   "Refresh retry bug investigation",
+	}); err != nil {
+		t.Fatalf("add note: %v", err)
+	}
+
+	rationale := "Retry token refresh only once after a 401 response"
+	if _, err := seedStore.AddDecision(ctx, store.AddDecisionInput{
+		RepoID:    repo.ID,
+		Branch:    "main",
+		Text:      "Use single refresh retry",
+		Rationale: &rationale,
+	}); err != nil {
+		t.Fatalf("add decision: %v", err)
+	}
+
+	if _, err := seedStore.AddHandoff(ctx, store.AddHandoffInput{
+		RepoID:  repo.ID,
+		Branch:  "main",
+		Summary: "Recent work focused on refresh retry failures.",
+	}); err != nil {
+		t.Fatalf("add handoff: %v", err)
+	}
+
+	indexedAt := time.Now().UTC().Round(time.Second)
+	if err := seedStore.ReplaceCommits(ctx, store.ReplaceCommitsInput{
+		RepoID:    repo.ID,
+		IndexedAt: indexedAt,
+		Commits: []store.Commit{
+			{
+				SHA:          "aaa111",
+				Author:       "Dan",
+				CommittedAt:  indexedAt,
+				Message:      "fix: token refresh retry",
+				Summary:      "fix: token refresh retry",
+				ChangedPaths: []string{"auth/refresh.go"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace commits: %v", err)
+	}
+
+	runRecallLikeRead := func(query string) error {
+		sqliteStore, err := Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("open store: %w", err)
+		}
+		defer sqliteStore.Close()
+
+		if err := sqliteStore.Migrate(ctx); err != nil {
+			return fmt.Errorf("migrate store: %w", err)
+		}
+
+		foundRepo, err := sqliteStore.FindRepoByPath(ctx, "/tmp/project")
+		if err != nil {
+			return fmt.Errorf("find repo: %w", err)
+		}
+		if foundRepo == nil {
+			return fmt.Errorf("repo missing after concurrent open")
+		}
+
+		if _, err := sqliteStore.SearchNotes(ctx, foundRepo.ID, "main", query, 10); err != nil {
+			return fmt.Errorf("search notes: %w", err)
+		}
+		if _, err := sqliteStore.SearchDecisions(ctx, foundRepo.ID, "main", query, 10); err != nil {
+			return fmt.Errorf("search decisions: %w", err)
+		}
+		if _, err := sqliteStore.SearchHandoffs(ctx, foundRepo.ID, "main", query, 10); err != nil {
+			return fmt.Errorf("search handoffs: %w", err)
+		}
+		if _, err := sqliteStore.SearchCommits(ctx, foundRepo.ID, query, 10); err != nil {
+			return fmt.Errorf("search commits: %w", err)
+		}
+
+		return nil
+	}
+
+	queries := []string{"refresh retry", "token refresh"}
+	for i := 0; i < 20; i++ {
+		var wg sync.WaitGroup
+		errCh := make(chan error, len(queries))
+
+		for _, query := range queries {
+			query := query
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errCh <- runRecallLikeRead(query)
+			}()
+		}
+
+		wg.Wait()
+		close(errCh)
+
+		for err := range errCh {
+			if err != nil {
+				t.Fatalf("concurrent recall-like read failed on iteration %d: %v", i+1, err)
+			}
+		}
 	}
 }

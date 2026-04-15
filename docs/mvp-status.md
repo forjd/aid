@@ -1,6 +1,6 @@
 # MVP Status
 
-Last updated: 2026-04-14
+Last updated: 2026-04-15
 
 This file is the repo's explicit implementation tracker.
 
@@ -23,7 +23,7 @@ If you are resuming work in a new session:
 
 ## Current Summary
 
-The core local-memory workflow is implemented end to end, and the previously listed follow-up gaps around task state control, history indexing cost, and resume / handoff reuse have now been closed.
+The core local-memory workflow is implemented end to end, and the previously listed follow-up gaps around task state control, history indexing cost, resume / handoff reuse, and real-repo FTS validation have now been closed.
 
 Working commands:
 
@@ -82,6 +82,8 @@ Working global flags:
 - SQLite migrations now use an explicit schema version.
 - The Go module path is now the canonical `github.com/forjd/aid`.
 - The repo now explicitly stays FTS-first; optional embeddings are deferred until real recall gaps justify the added complexity.
+- FTS-only recall has now been validated in larger real repos; exact and near-exact lexical queries perform well enough to keep embeddings deferred for now.
+- Concurrent `aid recall` runs against the same repo no longer trip transient SQLite `database is locked` failures during store open.
 
 ## Partial
 
@@ -106,11 +108,12 @@ Working global flags:
 
 ## Recommended Next Work
 
-1. Validate the FTS-only recall path in larger real repos before revisiting embeddings.
+1. Start the coverage-hardening pass in [docs/plans/code-coverage-improvement.md](./plans/code-coverage-improvement.md), beginning with direct tests for `internal/output`, `internal/resume`, and `internal/handoff`.
 2. Decide whether post-MVP expansion should go toward a TUI, background automation, or multi-user sync instead of keeping the tool intentionally CLI-only.
 
 ## Open Notes
 
 - The current implementation already satisfies the practical MVP command surface.
 - Remaining work is now product-expansion work rather than missing core command behavior.
+- Recent validation in larger repos suggests the main recall misses are tokenisation and phrasing gaps such as `town house` vs `townhouse` or `optimise` vs `speed up`, rather than a broad need for embeddings.
 - Future sessions should treat this file as the source of truth for implementation status.

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/forjd/aid/internal/app"
@@ -91,6 +92,83 @@ func TestLeafCommandAllowsHelpAsArgument(t *testing.T) {
 	output := runCLI(t, "recall", "help")
 	if !strings.Contains(output, "No matching context.") {
 		t.Fatalf("expected no matching context, got %q", output)
+	}
+}
+
+func TestConcurrentRecallSubprocessesDoNotHitDatabaseLocked(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+	writeFile(t, filepath.Join(repoDir, "README.md"), []byte("repo\n"))
+	runGitWithIdentity(t, repoDir, "add", "README.md")
+	runGitWithIdentity(t, repoDir, "commit", "-m", "feat: add readme")
+
+	env := []string{"AID_DATA_DIR=" + dataDir}
+
+	for _, args := range [][]string{
+		{"init"},
+		{"note", "add", "Refresh retry investigation"},
+		{"decide", "add", "Use single refresh retry"},
+		{"handoff", "generate"},
+		{"history", "index"},
+	} {
+		output, err := runCLISubprocess(t, repoDir, env, args...)
+		if err != nil {
+			t.Fatalf("seed command %v failed: %v\n%s", args, err, output)
+		}
+	}
+
+	type recallResult struct {
+		output string
+		err    error
+		args   []string
+	}
+
+	queries := [][]string{
+		{"recall", "refresh retry", "--json"},
+		{"recall", "token refresh", "--json"},
+	}
+
+	for i := 0; i < 20; i++ {
+		results := make(chan recallResult, len(queries))
+		var wg sync.WaitGroup
+
+		for _, args := range queries {
+			args := append([]string(nil), args...)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				output, err := runCLISubprocess(t, repoDir, env, args...)
+				results <- recallResult{output: output, err: err, args: args}
+			}()
+		}
+
+		wg.Wait()
+		close(results)
+
+		for result := range results {
+			if result.err != nil {
+				t.Fatalf("concurrent recall %v failed on iteration %d: %v\n%s", result.args, i+1, result.err, result.output)
+			}
+
+			var payload struct {
+				OK    bool `json:"ok"`
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(result.output), &payload); err != nil {
+				t.Fatalf("unmarshal recall output for %v on iteration %d: %v\n%s", result.args, i+1, err, result.output)
+			}
+			if !payload.OK {
+				message := ""
+				if payload.Error != nil {
+					message = payload.Error.Message
+				}
+				t.Fatalf("concurrent recall %v returned error payload on iteration %d: %s\n%s", result.args, i+1, message, result.output)
+			}
+		}
 	}
 }
 
@@ -1245,6 +1323,38 @@ func runCLI(t *testing.T, args ...string) string {
 	}
 
 	return stdout.String()
+}
+
+func TestCLIHelperProcess(t *testing.T) {
+	if os.Getenv("AID_TEST_SUBPROCESS") != "1" {
+		return
+	}
+
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+	}
+	if separator == -1 {
+		os.Exit(2)
+	}
+
+	exitCode := Run(os.Args[separator+1:], os.Stdout, os.Stderr)
+	os.Exit(exitCode)
+}
+
+func runCLISubprocess(t *testing.T, cwd string, env []string, args ...string) (string, error) {
+	t.Helper()
+
+	cmdArgs := append([]string{"-test.run=TestCLIHelperProcess", "--"}, args...)
+	cmd := exec.Command(os.Args[0], cmdArgs...)
+	cmd.Dir = cwd
+	cmd.Env = append(append(os.Environ(), "AID_TEST_SUBPROCESS=1"), env...)
+
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 func runGit(t *testing.T, cwd string, args ...string) {

@@ -151,9 +151,11 @@ docs/spec/              product specs and longer-form design docs
 
 ## Project Status
 
-`aid` is early, but the core local-memory workflow is already usable end to end. The current implementation includes real storage, config-driven defaults, FTS-backed recall across stored context, incremental history sync, and a practical resume/handoff loop.
+`aid` is early, but the core local-memory workflow is already usable end to end. The current implementation includes real storage, config-driven defaults, FTS-backed recall across stored context, incremental history sync, a practical resume/handoff loop, and direct coverage on the core logic packages.
 
 The module path now matches the canonical repository path: `github.com/forjd/aid`.
+
+For now, the product direction stays intentionally CLI-only. TUI, background automation, and multi-user sync remain deferred until real usage shows a concrete need.
 
 ## Releases
 
@@ -182,6 +184,7 @@ Homebrew automation also depends on a repository secret named `HOMEBREW_TAP_TOKE
 ```bash
 make fmt
 make test
+make test-cover
 go run ./cmd/aid --help
 ```
 

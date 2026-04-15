@@ -24,6 +24,7 @@ Common commands:
 make build
 make fmt
 make test
+make test-cover
 go run ./cmd/aid --help
 ```
 
@@ -41,7 +42,7 @@ go run ./cmd/aid --help
 - Follow the existing package boundaries in `internal/`.
 - Keep commands and flags explicit.
 - Add tests for behavior changes when practical.
-- Run `make fmt` and `make test` before opening a pull request.
+- Run `make fmt`, `make test`, and `make test-cover` before opening a pull request.
 
 ## Pull Requests
 

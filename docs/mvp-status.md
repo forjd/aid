@@ -18,12 +18,12 @@ If you are resuming work in a new session:
 1. read this file first
 2. skim [README.md](../README.md)
 3. refer to [docs/spec/mvp.md](./spec/mvp.md) for scope and non-goals
-4. run `go test ./...`
+4. run `make test-cover`
 5. run `go run ./cmd/aid --help`
 
 ## Current Summary
 
-The core local-memory workflow is implemented end to end, and the previously listed follow-up gaps around task state control, history indexing cost, resume / handoff reuse, and real-repo FTS validation have now been closed.
+The core local-memory workflow is implemented end to end. The coverage-hardening pass is now complete, CI enforces a whole-repo coverage floor, and the product direction is explicitly staying CLI-only for now rather than widening into a TUI, daemon, or sync service.
 
 Working commands:
 
@@ -84,6 +84,10 @@ Working global flags:
 - The repo now explicitly stays FTS-first; optional embeddings are deferred until real recall gaps justify the added complexity.
 - FTS-only recall has now been validated in larger real repos; exact and near-exact lexical queries perform well enough to keep embeddings deferred for now.
 - Concurrent `aid recall` runs against the same repo no longer trip transient SQLite `database is locked` failures during store open.
+- Direct tests now cover `internal/output`, `internal/resume`, `internal/handoff`, `internal/search`, `internal/config`, and `internal/git`.
+- `internal/cli` and `internal/store/sqlite` package-local coverage now meet the `80%` floor.
+- `make test-cover` is now the standard whole-repo coverage command for local work, and CI fails if whole-repo coverage drops below `80%`.
+- Post-MVP direction is now explicitly CLI-only for the near term; TUI, background automation, and multi-user sync remain deferred.
 
 ## Partial
 
@@ -108,12 +112,13 @@ Working global flags:
 
 ## Recommended Next Work
 
-1. Start the coverage-hardening pass in [docs/plans/code-coverage-improvement.md](./plans/code-coverage-improvement.md), beginning with direct tests for `internal/output`, `internal/resume`, and `internal/handoff`.
-2. Decide whether post-MVP expansion should go toward a TUI, background automation, or multi-user sync instead of keeping the tool intentionally CLI-only.
+1. Improve lexical normalisation and phrasing tolerance inside the existing recall flow, especially gaps like `town house` vs `townhouse` and `optimise` vs `speed up`.
+2. Keep tightening CLI ergonomics, recall ranking, and summary quality without expanding the product surface beyond the current repo-local CLI model.
 
 ## Open Notes
 
 - The current implementation already satisfies the practical MVP command surface.
-- Remaining work is now product-expansion work rather than missing core command behavior.
+- Remaining work should stay within the current CLI-first product shape unless real usage shows sustained pressure for something larger.
 - Recent validation in larger repos suggests the main recall misses are tokenisation and phrasing gaps such as `town house` vs `townhouse` or `optimise` vs `speed up`, rather than a broad need for embeddings.
+- Coverage guardrails are now in place, so feature work should preserve the shared `make test-cover` workflow instead of inventing new local-only measurements.
 - Future sessions should treat this file as the source of truth for implementation status.

@@ -1,7 +1,7 @@
 # Code Coverage Improvement Plan
 
-Status: proposed
-Last updated: 2026-04-14
+Status: completed
+Last updated: 2026-04-15
 
 ## Goal
 
@@ -14,6 +14,13 @@ The desired end state is:
 3. Zero-coverage and low-coverage branches around parsing, rendering, ranking, and recovery paths are explicitly exercised.
 4. Coverage on touched code stops drifting down over time.
 
+Completed on 2026-04-15 with:
+
+- `make test-cover` as the shared local coverage command
+- a CI workflow that runs the same coverage measurement and fails below `80%`
+- direct tests across `internal/output`, `internal/resume`, `internal/handoff`, `internal/search`, `internal/config`, and `internal/git`
+- package-local coverage at or above `80%` for both `internal/cli` and `internal/store/sqlite`
+
 ## Baseline
 
 Baseline captured on 2026-04-14 with:
@@ -22,7 +29,7 @@ Baseline captured on 2026-04-14 with:
 - `go test ./... -coverpkg=./... -coverprofile=coverage.out`
 - `go tool cover -func=coverage.out`
 
-Current snapshot:
+Baseline snapshot:
 
 - whole-repo statement coverage: `72.3%`
 - packages in repo: `12`
@@ -34,6 +41,19 @@ Current snapshot:
   - `internal/store/sqlite`: `71.2%`
 
 This number is better than the file count suggests because the CLI tests exercise several packages transitively. The weakness is that much of that coverage is indirect. A refactor inside `output`, `resume`, `handoff`, `search`, `config`, or `git` could regress behavior without a package-local test making the failure obvious.
+
+Completion snapshot captured on 2026-04-15 with `make test-cover` and package-local `go test ... -coverprofile` runs:
+
+- whole-repo statement coverage: `85.6%`
+- package-local coverage:
+  - `internal/output`: `90.5%`
+  - `internal/resume`: `90.6%`
+  - `internal/handoff`: `100.0%`
+  - `internal/search`: `100.0%`
+  - `internal/config`: `84.7%`
+  - `internal/git`: `83.3%`
+  - `internal/cli`: `80.9%`
+  - `internal/store/sqlite`: `80.0%`
 
 ## What the Baseline Is Telling Us
 
@@ -254,14 +274,14 @@ To keep the suite useful:
 
 ## Acceptance Checklist
 
-- [ ] coverage is measured with a documented single command
-- [ ] all current `0%` functions have tests
-- [ ] direct tests exist for `output`, `resume`, `handoff`, `search`, `config`, and `git`
-- [ ] whole-repo coverage is at least `80%`
-- [ ] package-local coverage for `internal/cli` is at least `80%`
-- [ ] package-local coverage for `internal/store/sqlite` is at least `80%`
-- [ ] CI reports coverage and prevents obvious regression
+- [x] coverage is measured with a documented single command
+- [x] all current `0%` functions have tests
+- [x] direct tests exist for `output`, `resume`, `handoff`, `search`, `config`, and `git`
+- [x] whole-repo coverage is at least `80%`
+- [x] package-local coverage for `internal/cli` is at least `80%`
+- [x] package-local coverage for `internal/store/sqlite` is at least `80%`
+- [x] CI reports coverage and prevents obvious regression
 
 ## Recommendation
 
-The best next move is not to add more broad CLI integration tests. It is to add direct tests around `internal/output`, `internal/resume`, and `internal/handoff` first. Those packages are rich in deterministic logic, they currently rely too much on incidental coverage, and they should move the coverage number materially with less brittleness than expanding the end-to-end suite.
+This plan is complete. Future test work should be incremental and behavior-driven: add regression tests when a bug is fixed or when new ranking, parsing, or rendering logic introduces real risk, rather than restarting another repo-wide coverage campaign.

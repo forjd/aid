@@ -31,6 +31,7 @@ jobs:
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" tap
           git -C tap checkout "$TAP_BRANCH"
           brew tap "$TAP_NAME" "$PWD/tap"
+          echo "TAP_REPOSITORY_PATH=$(brew --repository \"$TAP_NAME\")" >> "$GITHUB_ENV"
 
       - name: Render formula for release
         env:
@@ -42,6 +43,8 @@ jobs:
           archive_sha="$(shasum -a 256 source.tar.gz | awk '{print $1}')"
           mkdir -p "tap/$(dirname "$FORMULA_PATH")"
           sh ./scripts/render_homebrew_formula.sh "$RELEASE_TAG" "$archive_sha" "tap/$FORMULA_PATH"
+          mkdir -p "$TAP_REPOSITORY_PATH/$(dirname "$FORMULA_PATH")"
+          cp "tap/$FORMULA_PATH" "$TAP_REPOSITORY_PATH/$FORMULA_PATH"
 
       - name: Validate formula
         run: |

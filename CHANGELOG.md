@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/forjd/aid/compare/v0.4.3...v0.4.4) (2026-04-15)
+
+
+### Bug Fixes
+
+* harden local storage permissions and history indexing ([5e11aa9](https://github.com/forjd/aid/commit/5e11aa93348090b104dd0f8164e1520824fc2ea7))
+
 ## [0.4.3](https://github.com/forjd/aid/compare/v0.4.2...v0.4.3) (2026-04-15)
 
 

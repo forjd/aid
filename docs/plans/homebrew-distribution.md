@@ -106,14 +106,19 @@ Repository conventions:
 
 The formula should build from a tagged source archive, not download a prebuilt binary.
 
-Expected formula behavior:
+Use this exact source archive URL shape:
 
+- `https://github.com/forjd/aid/archive/refs/tags/vX.Y.Z.tar.gz`
+
+Expected formula behaviour:
+
+- `desc`, `homepage`, and `license` are set explicitly
 - source URL points at the tagged `aid` source archive for `vX.Y.Z`
 - `sha256` is pinned to that source archive
 - `depends_on "go" => :build`
-- build target is `./cmd/aid`
+- build uses `go build -trimpath -o bin/aid ./cmd/aid`
 - installed binary name is `aid`
-- test block executes a stable help command such as `aid --help`
+- test block executes a stable command that Homebrew can assert on, such as `aid --help`
 
 This keeps the formula conventional, auditable, and independent from archive naming details in the release assets.
 
@@ -135,10 +140,27 @@ Using the published release event keeps the tap update tied to the same release 
 The workflow should:
 
 1. read the release tag, such as `v0.2.0`
-2. compute the source archive URL for that tag
+2. compute the source archive URL for that tag as `https://github.com/forjd/aid/archive/refs/tags/<tag>.tar.gz`
 3. download the source archive and calculate its SHA-256
 4. render `Formula/aid.rb` from a small template or checked-in script
-5. commit and push the updated formula to `forjd/homebrew-tap`
+5. validate the rendered formula with `brew audit --strict`, `brew install --build-from-source`, and `brew test aid`
+6. commit and push the updated formula to `forjd/homebrew-tap`
+
+### Push strategy
+
+The workflow should push directly to `main` in `forjd/homebrew-tap` after validation passes.
+
+This keeps the release-to-tap path automatic and avoids leaving a published release waiting on a second manual merge step.
+
+### Failure behaviour
+
+If formula rendering or validation fails, the tap update job should fail loudly and leave the existing tap unchanged.
+
+This should not delete or rewrite the published GitHub Release. The operational expectation is:
+
+- the release remains available through GitHub Releases and `install.sh`
+- Homebrew stays on the previous known-good formula until the failure is fixed
+- the workflow failure is the signal to follow up manually
 
 ### Auth
 
@@ -175,7 +197,7 @@ The full intended flow is:
 2. `release-please` opens or updates the release PR
 3. merging the release PR creates the tag and GitHub Release
 4. the Homebrew workflow runs on `release.published`
-5. the workflow updates `forjd/homebrew-tap/Formula/aid.rb`
+5. the workflow validates and updates `forjd/homebrew-tap/Formula/aid.rb`
 6. users can install or upgrade with Homebrew
 
 This keeps the Homebrew update downstream from the release boundary instead of mixing tap logic into the main release job.
@@ -199,12 +221,14 @@ Create the first `Formula/aid.rb` using a released tag.
 
 Validate locally on a Homebrew machine with:
 
+- `brew audit --strict ./Formula/aid.rb`
 - `brew install --build-from-source ./Formula/aid.rb`
+- `brew test aid`
 - `aid --help`
 
 Success condition:
 
-- the formula installs cleanly from source and produces a working `aid` binary
+- the formula passes audit, installs cleanly from source, and produces a working `aid` binary
 
 ### Phase 3: automate formula updates
 
@@ -213,11 +237,12 @@ Add a workflow in the main repo to:
 - trigger on `release.published`
 - compute the source archive checksum
 - update the formula in `forjd/homebrew-tap`
+- validate the rendered formula before publishing it
 - push the change with `HOMEBREW_TAP_TOKEN`
 
 Success condition:
 
-- a newly published release updates the tap without manual edits
+- a newly published release updates the tap without manual edits when validation passes, and leaves the previous formula untouched when validation fails
 
 ### Phase 4: document the new install path
 

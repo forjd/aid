@@ -58,7 +58,9 @@ When opening a pull request:
 
 - Do not create release tags manually as the default workflow. Tags and GitHub Releases are created by `release-please` after its release PR is merged.
 - Make sure the repository secret `RELEASE_PLEASE_TOKEN` is configured before relying on automated releases.
+- Make sure the repository secret `HOMEBREW_TAP_TOKEN` is configured before relying on automated Homebrew tap updates.
 - If GitHub Actions cannot open release PRs, check that repository settings allow GitHub Actions to create and approve pull requests.
+- Homebrew releases update `forjd/homebrew-tap` only after the rendered formula passes `brew audit --strict`, `brew install --build-from-source`, and `brew test aid`.
 
 ## Commit Titles
 

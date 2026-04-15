@@ -1,0 +1,62 @@
+name: homebrew-tap
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    runs-on: macos-latest
+    env:
+      TAP_NAME: forjd/tap
+      TAP_REPOSITORY: forjd/homebrew-tap
+      TAP_BRANCH: main
+      FORMULA_PATH: Formula/aid.rb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Ensure Homebrew is available
+        run: brew --version
+
+      - name: Set up tap workspace
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          test -n "$HOMEBREW_TAP_TOKEN"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" tap
+          git -C tap checkout "$TAP_BRANCH"
+          brew tap "$TAP_NAME" "$PWD/tap"
+
+      - name: Render formula for release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          test -n "$RELEASE_TAG"
+          archive_url="https://github.com/forjd/aid/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+          curl -fsSL "$archive_url" -o source.tar.gz
+          archive_sha="$(shasum -a 256 source.tar.gz | awk '{print $1}')"
+          mkdir -p "tap/$(dirname "$FORMULA_PATH")"
+          sh ./scripts/render_homebrew_formula.sh "$RELEASE_TAG" "$archive_sha" "tap/$FORMULA_PATH"
+
+      - name: Validate formula
+        run: |
+          brew audit --strict "$TAP_NAME/aid"
+          brew install --build-from-source "$TAP_NAME/aid"
+          brew test "$TAP_NAME/aid"
+
+      - name: Commit and push tap update
+        working-directory: tap
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if git diff --quiet -- "$FORMULA_PATH"; then
+            exit 0
+          fi
+          git add "$FORMULA_PATH"
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "aid ${RELEASE_TAG}"
+          git push origin "$TAP_BRANCH"

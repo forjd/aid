@@ -38,6 +38,14 @@ Agents are good at short bursts of execution and weak at continuity. They forget
 
 ## Quickstart
 
+### Install with Homebrew
+
+For Homebrew users on macOS or Linux:
+
+```bash
+brew install forjd/tap/aid
+```
+
 ### Install a pre-built binary
 
 macOS and Linux:
@@ -154,8 +162,11 @@ Releases are intended to be automated from `main`.
 - Commits merged to `main` drive `release-please`, which opens or updates a release PR and maintains `CHANGELOG.md`.
 - Merging the release PR creates the SemVer tag and GitHub Release.
 - A tag-triggered GoReleaser workflow publishes `aid` binaries for Linux, macOS, and Windows plus `checksums.txt`.
+- A release-published workflow updates `forjd/homebrew-tap` after rendering and validating the Homebrew formula.
 
 This setup depends on a repository secret named `RELEASE_PLEASE_TOKEN`. Using the default `GITHUB_TOKEN` for release creation would prevent the follow-on tag workflow from running.
+
+Homebrew automation also depends on a repository secret named `HOMEBREW_TAP_TOKEN` with write access to `forjd/homebrew-tap`.
 
 ## Documentation
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/forjd/aid/compare/v0.4.0...v0.4.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* copy rendered formula into tapped checkout ([8e52e89](https://github.com/forjd/aid/commit/8e52e897539ef984c082dca07f1040668b6de437))
+
 ## [0.4.0](https://github.com/forjd/aid/compare/v0.3.1...v0.4.0) (2026-04-15)
 
 

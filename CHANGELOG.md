@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3](https://github.com/forjd/aid/compare/v0.4.2...v0.4.3) (2026-04-15)
+
+
+### Bug Fixes
+
+* avoid recall lock errors and harden core coverage ([da12986](https://github.com/forjd/aid/commit/da12986afe6eb8bb5ec44f7f67a73456c238414c))
+* detect new Homebrew formula files ([6d94e0b](https://github.com/forjd/aid/commit/6d94e0b4a86307a0c6fba84dc4039573997b81e1))
+
 ## [0.4.2](https://github.com/forjd/aid/compare/v0.4.1...v0.4.2) (2026-04-15)
 
 

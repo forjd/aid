@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/forjd/aid/compare/v0.3.1...v0.4.0) (2026-04-15)
+
+
+### Features
+
+* add Homebrew tap release automation ([1e1b25c](https://github.com/forjd/aid/commit/1e1b25c48b303f01ec460b7324236dc27b77c856))
+
 ## [0.3.1](https://github.com/forjd/aid/compare/v0.3.0...v0.3.1) (2026-04-14)
 
 

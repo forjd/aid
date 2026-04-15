@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/forjd/aid/compare/v0.4.1...v0.4.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* correct tapped repository path quoting ([fd9da88](https://github.com/forjd/aid/commit/fd9da882ed6b3e5f24044b3a6392a630963e80c3))
+
 ## [0.4.1](https://github.com/forjd/aid/compare/v0.4.0...v0.4.1) (2026-04-15)
 
 

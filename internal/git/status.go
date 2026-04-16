@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"strings"
 )
 
@@ -10,8 +11,8 @@ type WorktreeStatus struct {
 	Untracked int
 }
 
-func Status(startDir string) (WorktreeStatus, error) {
-	output, err := run(startDir, "status", "--porcelain")
+func Status(ctx context.Context, startDir string) (WorktreeStatus, error) {
+	output, err := run(ctx, startDir, "status", "--porcelain")
 	if err != nil {
 		return WorktreeStatus{}, err
 	}

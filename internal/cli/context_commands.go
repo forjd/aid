@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/forjd/aid/internal/git"
 	handoffpkg "github.com/forjd/aid/internal/handoff"
 	"github.com/forjd/aid/internal/output"
@@ -14,27 +11,27 @@ import (
 
 func resumeCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("resume does not accept arguments")
+		return newError(ErrCodeUsage, "resume does not accept arguments")
 	}
 
-	ctx := context.Background()
+	ctx := streams.context()
 	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	notes, err := runtime.store.ListNotes(ctx, runtime.repo.ID, 20)
+	notes, err := runtime.store.ListNotes(ctx, runtime.repo.ID, runtime.env.Branch, 20)
 	if err != nil {
 		return err
 	}
 
-	tasks, err := runtime.store.ListTasks(ctx, runtime.repo.ID, 50)
+	tasks, err := runtime.store.ListTasks(ctx, runtime.repo.ID, runtime.env.Branch, 50)
 	if err != nil {
 		return err
 	}
 
-	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, 20)
+	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, runtime.env.Branch, 20)
 	if err != nil {
 		return err
 	}
@@ -44,7 +41,7 @@ func resumeCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 3)
+	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, runtime.env.Branch, 3)
 	if err != nil {
 		return err
 	}
@@ -60,27 +57,27 @@ func resumeCommand(args []string, streams Streams) error {
 
 func handoffGenerateCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("handoff generate does not accept arguments")
+		return newError(ErrCodeUsage, "handoff generate does not accept arguments")
 	}
 
-	ctx := context.Background()
+	ctx := streams.context()
 	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	notes, err := runtime.store.ListNotes(ctx, runtime.repo.ID, 20)
+	notes, err := runtime.store.ListNotes(ctx, runtime.repo.ID, runtime.env.Branch, 20)
 	if err != nil {
 		return err
 	}
 
-	tasks, err := runtime.store.ListTasks(ctx, runtime.repo.ID, 50)
+	tasks, err := runtime.store.ListTasks(ctx, runtime.repo.ID, runtime.env.Branch, 50)
 	if err != nil {
 		return err
 	}
 
-	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, 20)
+	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, runtime.env.Branch, 20)
 	if err != nil {
 		return err
 	}
@@ -90,12 +87,12 @@ func handoffGenerateCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, 3)
+	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, runtime.env.Branch, 3)
 	if err != nil {
 		return err
 	}
 
-	worktree, err := git.Status(runtime.env.RepoRoot)
+	worktree, err := git.Status(ctx, runtime.env.RepoRoot)
 	if err != nil {
 		return err
 	}
@@ -119,16 +116,17 @@ func handoffGenerateCommand(args []string, streams Streams) error {
 
 func handoffListCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("handoff list does not accept arguments")
+		return newError(ErrCodeUsage, "handoff list does not accept arguments")
 	}
 
-	runtime, err := openInitializedRepo(context.Background(), streams)
+	ctx := streams.context()
+	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	handoffs, err := runtime.store.ListHandoffs(context.Background(), runtime.repo.ID, defaultListLimit)
+	handoffs, err := runtime.store.ListHandoffs(ctx, runtime.repo.ID, runtime.env.Branch, defaultListLimit)
 	if err != nil {
 		return err
 	}
@@ -142,7 +140,7 @@ func recallCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := streams.context()
 	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err

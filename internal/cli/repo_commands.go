@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
 	"os"
 
 	"github.com/forjd/aid/internal/config"
@@ -11,10 +9,10 @@ import (
 
 func initCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("init does not accept arguments")
+		return newError(ErrCodeUsage, "init does not accept arguments")
 	}
 
-	ctx := context.Background()
+	ctx := streams.context()
 	dbEnv, db, err := openStore(ctx, streams)
 	if err != nil {
 		return err
@@ -43,40 +41,53 @@ func initCommand(args []string, streams Streams) error {
 
 func statusCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("status does not accept arguments")
+		return newError(ErrCodeUsage, "status does not accept arguments")
 	}
 
-	ctx := context.Background()
-	dbEnv, db, err := openStore(ctx, streams)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	repo, err := db.FindRepoByPath(ctx, dbEnv.RepoRoot)
+	ctx := streams.context()
+	env, err := discoverEnvironment(streams)
 	if err != nil {
 		return err
 	}
 
 	configExists := true
-	if _, err := os.Stat(dbEnv.RepoConfigPath); err != nil {
+	if _, err := os.Stat(env.RepoConfigPath); err != nil {
 		if os.IsNotExist(err) {
 			configExists = false
 		} else {
-			return fmt.Errorf("stat repo config: %w", err)
+			return newError(ErrCodeInternal, "stat repo config: %v", err)
 		}
 	}
 
 	result := output.StatusResult{
-		RepoName:     dbEnv.RepoName,
-		RepoPath:     dbEnv.RepoRoot,
-		Branch:       dbEnv.Branch,
-		DBPath:       dbEnv.DBPath,
-		ConfigPath:   dbEnv.RepoConfigPath,
+		RepoName:     env.RepoName,
+		RepoPath:     env.RepoRoot,
+		Branch:       env.Branch,
+		DBPath:       env.DBPath,
+		ConfigPath:   env.RepoConfigPath,
 		ConfigExists: configExists,
-		Initialized:  repo != nil,
 	}
 
+	exists, err := repoExists(env)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return output.RenderStatus(streams.Out, streams.Options, result)
+	}
+
+	_, db, err := openStore(ctx, streams)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	repo, err := db.FindRepoByPath(ctx, env.RepoRoot)
+	if err != nil {
+		return err
+	}
+
+	result.Initialized = repo != nil
 	if repo != nil {
 		counts, err := db.StatusCounts(ctx, repo.ID)
 		if err != nil {

@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/forjd/aid/internal/output"
 	"github.com/forjd/aid/internal/store"
 )
@@ -14,13 +11,14 @@ func decisionAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	runtime, err := openInitializedRepo(context.Background(), streams)
+	ctx := streams.context()
+	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	decision, err := runtime.store.AddDecision(context.Background(), store.AddDecisionInput{
+	decision, err := runtime.store.AddDecision(ctx, store.AddDecisionInput{
 		RepoID: runtime.repo.ID,
 		Branch: runtime.env.Branch,
 		Text:   text,
@@ -34,16 +32,17 @@ func decisionAddCommand(args []string, streams Streams) error {
 
 func decisionListCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("decide list does not accept arguments")
+		return newError(ErrCodeUsage, "decide list does not accept arguments")
 	}
 
-	runtime, err := openInitializedRepo(context.Background(), streams)
+	ctx := streams.context()
+	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	decisions, err := runtime.store.ListDecisions(context.Background(), runtime.repo.ID, defaultListLimit)
+	decisions, err := runtime.store.ListDecisions(ctx, runtime.repo.ID, runtime.env.Branch, defaultListLimit)
 	if err != nil {
 		return err
 	}

@@ -21,7 +21,7 @@ type Store struct {
 	path string
 }
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 var migrations = [][]string{
 	{
@@ -48,7 +48,7 @@ var migrations = [][]string{
 			branch TEXT,
 			scope TEXT NOT NULL,
 			text TEXT NOT NULL,
-			status TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'blocked', 'done')),
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
@@ -162,9 +162,42 @@ var migrations = [][]string{
 			WHERE ranked.id = commits.id
 		), 0)`,
 	},
+	{
+		`CREATE TABLE tasks_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			repo_id INTEGER NOT NULL,
+			branch TEXT,
+			scope TEXT NOT NULL,
+			text TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'blocked', 'done')),
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO tasks_new (id, repo_id, branch, scope, text, status, created_at, updated_at)
+		 SELECT id, repo_id, branch, scope, text,
+			CASE status
+				WHEN 'open' THEN 'open'
+				WHEN 'in_progress' THEN 'in_progress'
+				WHEN 'blocked' THEN 'blocked'
+				WHEN 'done' THEN 'done'
+				ELSE 'open'
+			END,
+			created_at, updated_at
+		 FROM tasks`,
+		`DROP TABLE tasks`,
+		`ALTER TABLE tasks_new RENAME TO tasks`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_repo_updated_at ON tasks(repo_id, updated_at DESC)`,
+	},
 }
 
 func Open(path string) (*Store, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sqlite path %q: %w", path, err)
+	}
+	path = filepath.Clean(absPath)
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create app data directory: %w", err)
 	}
@@ -224,6 +257,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 	version, err := currentSchemaVersion(ctx, s.db)
 	if err != nil {
 		return err
+	}
+
+	if version > schemaVersion {
+		return fmt.Errorf("sqlite schema version %d is newer than supported %d; upgrade aid", version, schemaVersion)
 	}
 
 	for version < schemaVersion {
@@ -344,14 +381,17 @@ func (s *Store) AddNote(ctx context.Context, input store.AddNoteInput) (store.No
 	return note, nil
 }
 
-func (s *Store) ListNotes(ctx context.Context, repoID int64, limit int) ([]store.Note, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *Store) ListNotes(ctx context.Context, repoID int64, branch string, limit int) ([]store.Note, error) {
+	query, args := withBranchScope(`
 		SELECT id, repo_id, branch, scope, text, created_at
 		FROM notes
-		WHERE repo_id = ?
+		WHERE repo_id = ?`, branch, repoID)
+	query += `
 		ORDER BY created_at DESC, id DESC
-		LIMIT ?
-	`, repoID, limit)
+		LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list notes: %w", err)
 	}
@@ -374,6 +414,10 @@ func (s *Store) ListNotes(ctx context.Context, repoID int64, limit int) ([]store
 }
 
 func (s *Store) AddTask(ctx context.Context, input store.AddTaskInput) (store.Task, error) {
+	if !isValidTaskStatus(input.Status) {
+		return store.Task{}, fmt.Errorf("invalid task status %q", input.Status)
+	}
+
 	now := nowUTC()
 
 	result, err := s.db.ExecContext(ctx, `
@@ -397,11 +441,12 @@ func (s *Store) AddTask(ctx context.Context, input store.AddTaskInput) (store.Ta
 	return task, nil
 }
 
-func (s *Store) ListTasks(ctx context.Context, repoID int64, limit int) ([]store.Task, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *Store) ListTasks(ctx context.Context, repoID int64, branch string, limit int) ([]store.Task, error) {
+	query, args := withBranchScope(`
 		SELECT id, repo_id, branch, scope, text, status, created_at, updated_at
 		FROM tasks
-		WHERE repo_id = ?
+		WHERE repo_id = ?`, branch, repoID)
+	query += `
 		ORDER BY
 			CASE status
 				WHEN 'in_progress' THEN 0
@@ -412,8 +457,10 @@ func (s *Store) ListTasks(ctx context.Context, repoID int64, limit int) ([]store
 			END,
 			updated_at DESC,
 			id DESC
-		LIMIT ?
-	`, repoID, limit)
+		LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
@@ -507,14 +554,17 @@ func (s *Store) AddDecision(ctx context.Context, input store.AddDecisionInput) (
 	return decision, nil
 }
 
-func (s *Store) ListDecisions(ctx context.Context, repoID int64, limit int) ([]store.Decision, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *Store) ListDecisions(ctx context.Context, repoID int64, branch string, limit int) ([]store.Decision, error) {
+	query, args := withBranchScopeDecision(`
 		SELECT id, repo_id, branch, text, rationale, created_at
 		FROM decisions
-		WHERE repo_id = ?
+		WHERE repo_id = ?`, branch, repoID)
+	query += `
 		ORDER BY created_at DESC, id DESC
-		LIMIT ?
-	`, repoID, limit)
+		LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list decisions: %w", err)
 	}
@@ -572,14 +622,23 @@ func (s *Store) AddHandoff(ctx context.Context, input store.AddHandoffInput) (st
 	return handoff, nil
 }
 
-func (s *Store) ListHandoffs(ctx context.Context, repoID int64, limit int) ([]store.Handoff, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *Store) ListHandoffs(ctx context.Context, repoID int64, branch string, limit int) ([]store.Handoff, error) {
+	query := `
 		SELECT id, repo_id, branch, summary, created_at
 		FROM handoffs
-		WHERE repo_id = ?
+		WHERE repo_id = ?`
+	args := []any{repoID}
+	if branch != "" {
+		query += `
+		  AND (branch IS NULL OR branch = '' OR branch = ?)`
+		args = append(args, branch)
+	}
+	query += `
 		ORDER BY created_at DESC, id DESC
-		LIMIT ?
-	`, repoID, limit)
+		LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list handoffs: %w", err)
 	}
@@ -817,6 +876,7 @@ func (s *Store) SearchNotes(ctx context.Context, repoID int64, branch string, qu
 		JOIN notes n ON n.id = notes_fts.note_id
 		WHERE notes_fts.repo_id = ?
 		  AND notes_fts MATCH ?
+		  AND (n.scope = 'repo' OR n.branch IS NULL OR n.branch = '' OR n.branch = ?)
 		ORDER BY
 			CASE
 				WHEN notes_fts.branch = ? THEN 0
@@ -827,7 +887,7 @@ func (s *Store) SearchNotes(ctx context.Context, repoID int64, branch string, qu
 			n.created_at DESC,
 			n.id DESC
 		LIMIT ?
-	`, repoID, ftsQuery, branch, limit)
+	`, repoID, ftsQuery, branch, branch, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search notes: %w", err)
 	}
@@ -865,6 +925,7 @@ func (s *Store) SearchDecisions(ctx context.Context, repoID int64, branch string
 		JOIN decisions d ON d.id = decisions_fts.decision_id
 		WHERE decisions_fts.repo_id = ?
 		  AND decisions_fts MATCH ?
+		  AND (d.branch IS NULL OR d.branch = '' OR d.branch = ?)
 		ORDER BY
 			CASE
 				WHEN decisions_fts.branch = ? THEN 0
@@ -875,7 +936,7 @@ func (s *Store) SearchDecisions(ctx context.Context, repoID int64, branch string
 			d.created_at DESC,
 			d.id DESC
 		LIMIT ?
-	`, repoID, ftsQuery, branch, limit)
+	`, repoID, ftsQuery, branch, branch, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search decisions: %w", err)
 	}
@@ -913,6 +974,7 @@ func (s *Store) SearchHandoffs(ctx context.Context, repoID int64, branch string,
 		JOIN handoffs h ON h.id = handoffs_fts.handoff_id
 		WHERE handoffs_fts.repo_id = ?
 		  AND handoffs_fts MATCH ?
+		  AND (h.branch IS NULL OR h.branch = '' OR h.branch = ?)
 		ORDER BY
 			CASE
 				WHEN handoffs_fts.branch = ? THEN 0
@@ -923,7 +985,7 @@ func (s *Store) SearchHandoffs(ctx context.Context, repoID int64, branch string,
 			h.created_at DESC,
 			h.id DESC
 		LIMIT ?
-	`, repoID, ftsQuery, branch, limit)
+	`, repoID, ftsQuery, branch, branch, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search handoffs: %w", err)
 	}
@@ -1003,107 +1065,111 @@ func (s *Store) StatusCounts(ctx context.Context, repoID int64) (store.StatusCou
 }
 
 func (s *Store) ensureCommitFTS(ctx context.Context, repoID int64) error {
-	var commitCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM commits
-		WHERE repo_id = ?
-	`, repoID).Scan(&commitCount); err != nil {
-		return fmt.Errorf("count commits: %w", err)
-	}
-
-	var indexedCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM commits_fts
-		WHERE repo_id = ?
-	`, repoID).Scan(&indexedCount); err != nil {
-		return fmt.Errorf("count indexed commits: %w", err)
-	}
-
-	if indexedCount == commitCount {
-		return nil
-	}
-
-	return rebuildCommitFTS(ctx, s.db, repoID)
+	return s.ensureFTSInTx(ctx, repoID, "commits", "commits_fts", rebuildCommitFTS)
 }
 
 func (s *Store) ensureNoteFTS(ctx context.Context, repoID int64) error {
-	var noteCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM notes
-		WHERE repo_id = ?
-	`, repoID).Scan(&noteCount); err != nil {
-		return fmt.Errorf("count notes: %w", err)
-	}
-
-	var indexedCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM notes_fts
-		WHERE repo_id = ?
-	`, repoID).Scan(&indexedCount); err != nil {
-		return fmt.Errorf("count indexed notes: %w", err)
-	}
-
-	if indexedCount == noteCount {
-		return nil
-	}
-
-	return rebuildNoteFTS(ctx, s.db, repoID)
+	return s.ensureFTSInTx(ctx, repoID, "notes", "notes_fts", rebuildNoteFTS)
 }
 
 func (s *Store) ensureDecisionFTS(ctx context.Context, repoID int64) error {
-	var decisionCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM decisions
-		WHERE repo_id = ?
-	`, repoID).Scan(&decisionCount); err != nil {
-		return fmt.Errorf("count decisions: %w", err)
-	}
-
-	var indexedCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM decisions_fts
-		WHERE repo_id = ?
-	`, repoID).Scan(&indexedCount); err != nil {
-		return fmt.Errorf("count indexed decisions: %w", err)
-	}
-
-	if indexedCount == decisionCount {
-		return nil
-	}
-
-	return rebuildDecisionFTS(ctx, s.db, repoID)
+	return s.ensureFTSInTx(ctx, repoID, "decisions", "decisions_fts", rebuildDecisionFTS)
 }
 
 func (s *Store) ensureHandoffFTS(ctx context.Context, repoID int64) error {
-	var handoffCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM handoffs
-		WHERE repo_id = ?
-	`, repoID).Scan(&handoffCount); err != nil {
-		return fmt.Errorf("count handoffs: %w", err)
-	}
+	return s.ensureFTSInTx(ctx, repoID, "handoffs", "handoffs_fts", rebuildHandoffFTS)
+}
 
-	var indexedCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM handoffs_fts
-		WHERE repo_id = ?
-	`, repoID).Scan(&indexedCount); err != nil {
-		return fmt.Errorf("count indexed handoffs: %w", err)
+func (s *Store) ensureFTSInTx(
+	ctx context.Context,
+	repoID int64,
+	sourceTable string,
+	ftsTable string,
+	rebuild func(ctx context.Context, exec execer, repoID int64) error,
+) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin %s repair transaction: %w", ftsTable, err)
 	}
+	defer tx.Rollback()
 
-	if indexedCount == handoffCount {
+	needsRebuild, err := ftsNeedsRebuild(ctx, tx, repoID, sourceTable, ftsTable)
+	if err != nil {
+		return err
+	}
+	if !needsRebuild {
 		return nil
 	}
 
-	return rebuildHandoffFTS(ctx, s.db, repoID)
+	if err := rebuild(ctx, tx, repoID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit %s repair: %w", ftsTable, err)
+	}
+	return nil
+}
+
+func ftsNeedsRebuild(ctx context.Context, tx *sql.Tx, repoID int64, sourceTable, ftsTable string) (bool, error) {
+	var sourceCount int
+	if err := tx.QueryRowContext(
+		ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE repo_id = ?`, sourceTable),
+		repoID,
+	).Scan(&sourceCount); err != nil {
+		return false, fmt.Errorf("count %s: %w", sourceTable, err)
+	}
+
+	var indexedCount int
+	if err := tx.QueryRowContext(
+		ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE repo_id = ?`, ftsTable),
+		repoID,
+	).Scan(&indexedCount); err != nil {
+		return false, fmt.Errorf("count %s: %w", ftsTable, err)
+	}
+
+	if sourceCount != indexedCount {
+		return true, nil
+	}
+	if sourceCount == 0 {
+		return false, nil
+	}
+
+	var mismatched int
+	if err := tx.QueryRowContext(
+		ctx,
+		fmt.Sprintf(`
+			SELECT COUNT(*)
+			FROM %s AS src
+			WHERE src.repo_id = ?
+			  AND NOT EXISTS (
+			    SELECT 1 FROM %s AS fts
+			    WHERE fts.repo_id = src.repo_id
+			      AND fts.%s = src.id
+			  )
+		`, sourceTable, ftsTable, ftsJoinColumn(sourceTable)),
+		repoID,
+	).Scan(&mismatched); err != nil {
+		return false, fmt.Errorf("detect %s drift: %w", ftsTable, err)
+	}
+	return mismatched > 0, nil
+}
+
+func ftsJoinColumn(sourceTable string) string {
+	switch sourceTable {
+	case "commits":
+		return "commit_id"
+	case "notes":
+		return "note_id"
+	case "decisions":
+		return "decision_id"
+	case "handoffs":
+		return "handoff_id"
+	default:
+		return "id"
+	}
 }
 
 type queryRower interface {
@@ -1573,4 +1639,30 @@ func nullableString(value string) any {
 	}
 
 	return value
+}
+
+// withBranchScope appends a scope filter so only repo-scoped items or items
+// matching the given branch are returned. An empty branch disables filtering.
+func withBranchScope(baseQuery string, branch string, args ...any) (string, []any) {
+	params := append([]any(nil), args...)
+	if branch == "" {
+		return baseQuery, params
+	}
+	baseQuery += `
+		  AND (scope = 'repo' OR branch IS NULL OR branch = '' OR branch = ?)`
+	params = append(params, branch)
+	return baseQuery, params
+}
+
+// withBranchScopeDecision is a variant for decisions, which do not have a scope
+// column. Branch-scoped filtering falls back to branch equality only.
+func withBranchScopeDecision(baseQuery string, branch string, args ...any) (string, []any) {
+	params := append([]any(nil), args...)
+	if branch == "" {
+		return baseQuery, params
+	}
+	baseQuery += `
+		  AND (branch IS NULL OR branch = '' OR branch = ?)`
+	params = append(params, branch)
+	return baseQuery, params
 }

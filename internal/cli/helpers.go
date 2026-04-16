@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/forjd/aid/internal/git"
@@ -14,7 +13,7 @@ const defaultListLimit = 20
 func joinArgs(args []string, label string) (string, error) {
 	text := strings.TrimSpace(strings.Join(args, " "))
 	if text == "" {
-		return "", fmt.Errorf("missing %s", label)
+		return "", newError(ErrCodeUsage, "missing %s", label)
 	}
 
 	return text, nil
@@ -29,7 +28,7 @@ func recentContextCommits(ctx context.Context, runtime *repoRuntime, limit int) 
 		return commits, nil
 	}
 
-	liveCommits, err := git.RecentCommits(runtime.env.RepoRoot, limit)
+	liveCommits, err := git.RecentCommits(ctx, runtime.env.RepoRoot, limit)
 	if err != nil {
 		return nil, err
 	}

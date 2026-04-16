@@ -1,8 +1,7 @@
 package cli
 
 import (
-	"context"
-	"fmt"
+	"strings"
 
 	"github.com/forjd/aid/internal/output"
 	"github.com/forjd/aid/internal/store"
@@ -14,13 +13,14 @@ func taskAddCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	runtime, err := openInitializedRepo(context.Background(), streams)
+	ctx := streams.context()
+	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	task, err := runtime.store.AddTask(context.Background(), store.AddTaskInput{
+	task, err := runtime.store.AddTask(ctx, store.AddTaskInput{
 		RepoID: runtime.repo.ID,
 		Branch: runtime.env.Branch,
 		Scope:  store.ScopeBranch,
@@ -36,16 +36,17 @@ func taskAddCommand(args []string, streams Streams) error {
 
 func taskListCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("task list does not accept arguments")
+		return newError(ErrCodeUsage, "task list does not accept arguments")
 	}
 
-	runtime, err := openInitializedRepo(context.Background(), streams)
+	ctx := streams.context()
+	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	tasks, err := runtime.store.ListTasks(context.Background(), runtime.repo.ID, defaultListLimit)
+	tasks, err := runtime.store.ListTasks(ctx, runtime.repo.ID, runtime.env.Branch, defaultListLimit)
 	if err != nil {
 		return err
 	}
@@ -71,22 +72,26 @@ func taskReopenCommand(args []string, streams Streams) error {
 
 func taskStatusCommand(args []string, streams Streams, status store.TaskStatus) error {
 	if len(args) != 1 {
-		return fmt.Errorf("task %s expects exactly one task id", taskCommandName(status))
+		return newError(ErrCodeUsage, "task %s expects exactly one task id", taskCommandName(status))
 	}
 
 	taskID, err := store.ParseTaskRef(args[0])
 	if err != nil {
-		return err
+		return newError(ErrCodeInvalidInput, "%s", err.Error())
 	}
 
-	runtime, err := openInitializedRepo(context.Background(), streams)
+	ctx := streams.context()
+	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	task, err := runtime.store.UpdateTaskStatus(context.Background(), runtime.repo.ID, taskID, status)
+	task, err := runtime.store.UpdateTaskStatus(ctx, runtime.repo.ID, taskID, status)
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return newError(ErrCodeNotFound, "%s", err.Error())
+		}
 		return err
 	}
 

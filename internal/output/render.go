@@ -92,6 +92,29 @@ type RecallResult struct {
 	Result RecallData
 }
 
+type HelpSubcommand struct {
+	Name    string
+	Use     string
+	Summary string
+	Path    string
+}
+
+type HelpResult struct {
+	Command     string
+	Path        string
+	Summary     string
+	Description string
+	Usage       string
+	Examples    []string
+	Subcommands []HelpSubcommand
+}
+
+type VersionResult struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
 func (o Options) IsBrief() bool {
 	return o.Format == FormatBrief
 }
@@ -105,13 +128,79 @@ func (o Options) IsVerbose() bool {
 }
 
 func WriteError(w io.Writer, command string, err error) error {
+	return WriteErrorWithCode(w, command, "internal_error", err)
+}
+
+func WriteErrorWithCode(w io.Writer, command string, code string, err error) error {
 	return writeJSON(w, envelope{
 		SchemaVersion: "1",
 		OK:            false,
 		Command:       commandName(command),
 		Data:          nil,
-		Error:         &errorPayload{Message: err.Error()},
+		Error:         &errorPayload{Message: err.Error(), Code: code},
 	})
+}
+
+func WriteVersion(w io.Writer, result VersionResult) error {
+	return writeJSON(w, envelope{
+		SchemaVersion: "1",
+		OK:            true,
+		Command:       "version",
+		Data: versionPayload{
+			Version: result.Version,
+			Commit:  result.Commit,
+			Date:    result.Date,
+		},
+		Error: nil,
+	})
+}
+
+type versionPayload struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit,omitempty"`
+	Date    string `json:"date,omitempty"`
+}
+
+func WriteHelp(w io.Writer, result HelpResult) error {
+	subs := make([]helpSubcommandPayload, 0, len(result.Subcommands))
+	for _, sub := range result.Subcommands {
+		subs = append(subs, helpSubcommandPayload{
+			Name:    sub.Name,
+			Use:     sub.Use,
+			Summary: sub.Summary,
+			Path:    sub.Path,
+		})
+	}
+	return writeJSON(w, envelope{
+		SchemaVersion: "1",
+		OK:            true,
+		Command:       result.Command,
+		Data: helpPayload{
+			Path:        result.Path,
+			Summary:     result.Summary,
+			Description: result.Description,
+			Usage:       result.Usage,
+			Examples:    append([]string(nil), result.Examples...),
+			Subcommands: subs,
+		},
+		Error: nil,
+	})
+}
+
+type helpSubcommandPayload struct {
+	Name    string `json:"name"`
+	Use     string `json:"use"`
+	Summary string `json:"summary"`
+	Path    string `json:"path"`
+}
+
+type helpPayload struct {
+	Path        string                  `json:"path"`
+	Summary     string                  `json:"summary"`
+	Description string                  `json:"description"`
+	Usage       string                  `json:"usage"`
+	Examples    []string                `json:"examples"`
+	Subcommands []helpSubcommandPayload `json:"subcommands"`
 }
 
 func RenderInit(w io.Writer, opts Options, result InitResult) error {
@@ -1078,6 +1167,7 @@ type envelope struct {
 
 type errorPayload struct {
 	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
 }
 
 type notePayload struct {

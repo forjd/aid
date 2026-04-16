@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -9,7 +10,7 @@ import (
 )
 
 func Root(startDir string) (string, error) {
-	output, err := run(startDir, "rev-parse", "--show-toplevel")
+	output, err := run(context.Background(), startDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", fmt.Errorf("resolve git repository root: %w", err)
 	}
@@ -18,7 +19,7 @@ func Root(startDir string) (string, error) {
 }
 
 func Branch(startDir string) (string, error) {
-	output, err := run(startDir, "branch", "--show-current")
+	output, err := run(context.Background(), startDir, "branch", "--show-current")
 	if err != nil {
 		return "", fmt.Errorf("resolve git branch: %w", err)
 	}
@@ -30,14 +31,20 @@ func Branch(startDir string) (string, error) {
 	return output, nil
 }
 
-func run(startDir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", startDir}, args...)...)
+func run(ctx context.Context, startDir string, args ...string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", startDir}, args...)...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	output, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		if errors.As(err, new(*exec.ExitError)) {
 			message := strings.TrimSpace(stderr.String())
 			if message == "" {

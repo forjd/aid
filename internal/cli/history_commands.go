@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	historypkg "github.com/forjd/aid/internal/history"
@@ -11,10 +9,10 @@ import (
 
 func historyIndexCommand(args []string, streams Streams) error {
 	if len(args) > 0 {
-		return fmt.Errorf("history index does not accept arguments")
+		return newError(ErrCodeUsage, "history index does not accept arguments")
 	}
 
-	ctx := context.Background()
+	ctx := streams.context()
 	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
@@ -22,7 +20,7 @@ func historyIndexCommand(args []string, streams Streams) error {
 	defer runtime.close()
 
 	service := historypkg.Service{
-		Git:   historypkg.DefaultGitClient{},
+		Git:   historypkg.DefaultGitClient{Ctx: ctx},
 		Store: runtime.store,
 		Now:   time.Now,
 	}
@@ -47,13 +45,14 @@ func historySearchCommand(args []string, streams Streams) error {
 		return err
 	}
 
-	runtime, err := openInitializedRepo(context.Background(), streams)
+	ctx := streams.context()
+	runtime, err := openInitializedRepo(ctx, streams)
 	if err != nil {
 		return err
 	}
 	defer runtime.close()
 
-	commits, err := runtime.store.SearchCommits(context.Background(), runtime.repo.ID, query, defaultListLimit)
+	commits, err := runtime.store.SearchCommits(ctx, runtime.repo.ID, query, defaultListLimit)
 	if err != nil {
 		return err
 	}

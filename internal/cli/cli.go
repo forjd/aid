@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/forjd/aid/internal/app"
 	"github.com/forjd/aid/internal/config"
@@ -14,6 +18,14 @@ type Streams struct {
 	Out     io.Writer
 	Err     io.Writer
 	Options output.Options
+	Ctx     context.Context
+}
+
+func (s Streams) context() context.Context {
+	if s.Ctx != nil {
+		return s.Ctx
+	}
+	return context.Background()
 }
 
 type Command struct {
@@ -29,44 +41,50 @@ type Command struct {
 }
 
 func Run(args []string, stdout, stderr io.Writer) int {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	return RunWithContext(ctx, args, stdout, stderr)
+}
+
+func RunWithContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	options, filteredArgs, err := parseGlobalOptions(args)
 	if err != nil {
-		if options.IsJSON() {
-			_ = output.WriteError(stdout, inferCommandPath(rootCommand(), filteredArgs), err)
-			return 1
-		}
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+		usageErr := newError(ErrCodeUsage, "%s", err.Error())
+		return emitError(stdout, stderr, options, inferCommandPath(rootCommand(), filteredArgs), usageErr)
 	}
 
 	options, err = applyConfiguredDefaults(options, filteredArgs)
 	if err != nil {
-		if options.IsJSON() {
-			_ = output.WriteError(stdout, inferCommandPath(rootCommand(), filteredArgs), err)
-			return 1
-		}
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+		configErr := newError(ErrCodeInvalidInput, "%s", err.Error())
+		return emitError(stdout, stderr, options, inferCommandPath(rootCommand(), filteredArgs), configErr)
 	}
 
 	streams := Streams{
 		Out:     stdout,
 		Err:     stderr,
 		Options: options,
+		Ctx:     ctx,
 	}
 
 	root := rootCommand()
 	if err := dispatch(root, filteredArgs, streams); err != nil {
-		if streams.Options.IsJSON() {
-			_ = output.WriteError(stdout, inferCommandPath(root, filteredArgs), err)
-			return 1
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			err = newError(ErrCodeCancelled, "%s", err.Error())
 		}
-
-		fmt.Fprintf(streams.Err, "Error: %v\n", err)
-		return 1
+		return emitError(stdout, stderr, streams.Options, inferCommandPath(root, filteredArgs), err)
 	}
 
-	return 0
+	return exitSuccess
+}
+
+func emitError(stdout, stderr io.Writer, opts output.Options, command string, err error) int {
+	code := codeFor(err)
+	if opts.IsJSON() {
+		_ = output.WriteErrorWithCode(stdout, command, string(code), err)
+		return exitCodeFor(err)
+	}
+	fmt.Fprintf(stderr, "Error: %v\n", err)
+	return exitCodeFor(err)
 }
 
 func dispatch(cmd *Command, args []string, streams Streams) error {
@@ -75,12 +93,12 @@ func dispatch(cmd *Command, args []string, streams Streams) error {
 			return cmd.Run(nil, streams)
 		}
 
-		renderHelp(cmd, streams.Out)
+		renderHelp(cmd, streams)
 		return nil
 	}
 
 	if isHelpFlag(args[0]) {
-		renderHelp(cmd, streams.Out)
+		renderHelp(cmd, streams)
 		return nil
 	}
 
@@ -88,10 +106,10 @@ func dispatch(cmd *Command, args []string, streams Streams) error {
 		if args[0] == "help" {
 			target, err := lookupHelpTarget(cmd, args[1:])
 			if err != nil {
-				return err
+				return newError(ErrCodeUsage, "%s", err.Error())
 			}
 
-			renderHelp(target, streams.Out)
+			renderHelp(target, streams)
 			return nil
 		}
 
@@ -104,7 +122,7 @@ func dispatch(cmd *Command, args []string, streams Streams) error {
 		return cmd.Run(args, streams)
 	}
 
-	return fmt.Errorf("unknown command %q", args[0])
+	return newError(ErrCodeUsage, "unknown command %q", args[0])
 }
 
 func lookupHelpTarget(start *Command, path []string) (*Command, error) {
@@ -126,7 +144,47 @@ func lookupHelpTarget(start *Command, path []string) (*Command, error) {
 	return current, nil
 }
 
-func renderHelp(cmd *Command, out io.Writer) {
+func renderHelp(cmd *Command, streams Streams) {
+	if streams.Options.IsJSON() {
+		_ = output.WriteHelp(streams.Out, output.HelpResult{
+			Command:     commandIdentifier(cmd.Path),
+			Path:        cmd.Path,
+			Summary:     cmd.Summary,
+			Description: cmd.Description,
+			Usage:       cmd.Usage,
+			Examples:    append([]string(nil), cmd.Examples...),
+			Subcommands: subcommandsFor(cmd),
+		})
+		return
+	}
+	renderHelpText(cmd, streams.Out)
+}
+
+func subcommandsFor(cmd *Command) []output.HelpSubcommand {
+	if len(cmd.Children) == 0 {
+		return nil
+	}
+	children := make([]output.HelpSubcommand, 0, len(cmd.Children))
+	for _, child := range cmd.Children {
+		children = append(children, output.HelpSubcommand{
+			Name:    child.Name,
+			Use:     child.Use,
+			Summary: child.Summary,
+			Path:    child.Path,
+		})
+	}
+	return children
+}
+
+func commandIdentifier(path string) string {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(path, "aid"))
+	if trimmed == "" {
+		return "aid"
+	}
+	return strings.TrimSpace(trimmed)
+}
+
+func renderHelpText(cmd *Command, out io.Writer) {
 	title := cmd.Description
 	if title == "" {
 		title = fmt.Sprintf("%s - %s", cmd.Path, cmd.Summary)
@@ -144,6 +202,7 @@ func renderHelp(cmd *Command, out io.Writer) {
 	fmt.Fprintln(out, "  --verbose           Prefer fuller human-readable output")
 	fmt.Fprintln(out, "  --repo <path>       Operate on a specific repository")
 	fmt.Fprintln(out, "  --help              Show help for a command")
+	fmt.Fprintln(out, "  --                  Stop option parsing; remaining args are positional")
 
 	if len(cmd.Children) > 0 {
 		fmt.Fprintln(out)
@@ -318,6 +377,7 @@ func rootCommand() *Command {
 			command("status", "aid status", "status", "aid status [options]", "Show repo memory status", statusCommand),
 			command("resume", "aid resume", "resume", "aid resume [options]", "Show a compact working summary", resumeCommand),
 			command("recall", "aid recall", "recall <query>", "aid recall <query> [options]", "Search notes, decisions, handoffs, and commits", recallCommand),
+			command("version", "aid version", "version", "aid version [options]", "Show build version information", versionCommand),
 			note,
 			task,
 			decide,
@@ -331,9 +391,17 @@ func parseGlobalOptions(args []string) (output.Options, []string, error) {
 	opts := output.Options{Format: output.FormatHuman}
 	filtered := make([]string, 0, len(args))
 
+	passthrough := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if passthrough {
+			filtered = append(filtered, arg)
+			continue
+		}
+
 		switch {
+		case arg == "--":
+			passthrough = true
 		case arg == "--json":
 			if opts.IsBrief() || opts.IsVerbose() {
 				return opts, filtered, fmt.Errorf("cannot combine --json with --brief or --verbose")

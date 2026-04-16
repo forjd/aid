@@ -16,18 +16,26 @@ type GitClient interface {
 }
 
 type CommitStore interface {
-	ListCommits(ctx context.Context, repoID int64, limit int) ([]store.Commit, error)
 	SyncCommits(ctx context.Context, input store.SyncCommitsInput) (store.SyncCommitsResult, error)
 }
 
-type DefaultGitClient struct{}
-
-func (DefaultGitClient) AllCommitSHAs(startDir string) ([]string, error) {
-	return git.AllCommitSHAs(startDir)
+type DefaultGitClient struct {
+	Ctx context.Context
 }
 
-func (DefaultGitClient) CommitsBySHA(startDir string, shas []string) ([]git.Commit, error) {
-	return git.CommitsBySHA(startDir, shas)
+func (c DefaultGitClient) ctx() context.Context {
+	if c.Ctx != nil {
+		return c.Ctx
+	}
+	return context.Background()
+}
+
+func (c DefaultGitClient) AllCommitSHAs(startDir string) ([]string, error) {
+	return git.AllCommitSHAs(c.ctx(), startDir)
+}
+
+func (c DefaultGitClient) CommitsBySHA(startDir string, shas []string) ([]git.Commit, error) {
+	return git.CommitsBySHA(c.ctx(), startDir, shas)
 }
 
 type Service struct {
@@ -64,47 +72,23 @@ func (s Service) Index(ctx context.Context, repoRoot string, repoID int64, ignor
 		return Result{}, err
 	}
 
-	existingCommits, err := s.Store.ListCommits(ctx, repoID, 0)
+	// Fetch commits fresh from git each run. This keeps the index consistent
+	// with the current ignore_paths config: if paths that were previously
+	// filtered are now included, they reappear on the next index run.
+	freshCommits, err := gitClient.CommitsBySHA(repoRoot, reachableSHAs)
 	if err != nil {
 		return Result{}, err
 	}
 
-	existingBySHA := make(map[string]store.Commit, len(existingCommits))
-	for _, commit := range existingCommits {
-		existingBySHA[commit.SHA] = commit
-	}
-
-	newSHAs := make([]string, 0, len(reachableSHAs))
-	for _, sha := range reachableSHAs {
-		if _, ok := existingBySHA[sha]; ok {
-			continue
-		}
-		newSHAs = append(newSHAs, sha)
-	}
-
-	newCommits, err := gitClient.CommitsBySHA(repoRoot, newSHAs)
-	if err != nil {
-		return Result{}, err
-	}
-
-	newBySHA := make(map[string]git.Commit, len(newCommits))
-	for _, commit := range newCommits {
-		newBySHA[commit.SHA] = commit
+	freshBySHA := make(map[string]git.Commit, len(freshCommits))
+	for _, commit := range freshCommits {
+		freshBySHA[commit.SHA] = commit
 	}
 
 	storeCommits := make([]store.Commit, 0, len(reachableSHAs))
 	totalReachable := len(reachableSHAs)
 	for index, sha := range reachableSHAs {
-		if existing, ok := existingBySHA[sha]; ok {
-			filtered, keep := filteredStoredCommit(existing, ignorePaths)
-			if keep {
-				filtered.GitOrder = totalReachable - index - 1
-				storeCommits = append(storeCommits, filtered)
-			}
-			continue
-		}
-
-		commit, ok := newBySHA[sha]
+		commit, ok := freshBySHA[sha]
 		if !ok {
 			continue
 		}
@@ -165,16 +149,6 @@ func filteredGitCommit(commit git.Commit, ignorePaths []string) (store.Commit, b
 		Summary:      commit.Summary,
 		ChangedPaths: paths,
 	}, true
-}
-
-func filteredStoredCommit(commit store.Commit, ignorePaths []string) (store.Commit, bool) {
-	paths := filterChangedPaths(commit.ChangedPaths, ignorePaths)
-	if len(commit.ChangedPaths) > 0 && len(paths) == 0 {
-		return store.Commit{}, false
-	}
-
-	commit.ChangedPaths = paths
-	return commit, true
 }
 
 func matchesIgnoredPath(path string, ignorePaths []string) bool {

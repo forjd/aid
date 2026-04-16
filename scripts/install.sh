@@ -158,6 +158,27 @@ download "${BASE_URL}/${ARCHIVE_NAME}" "$ARCHIVE_PATH"
 log "Downloading ${CHECKSUM_NAME}"
 download "${BASE_URL}/${CHECKSUM_NAME}" "$CHECKSUM_PATH"
 
+if command -v cosign >/dev/null 2>&1; then
+  SIG_PATH="${CHECKSUM_PATH}.sig"
+  CERT_PATH="${CHECKSUM_PATH}.pem"
+  log "Downloading cosign signature for ${CHECKSUM_NAME}"
+  if download "${BASE_URL}/${CHECKSUM_NAME}.sig" "$SIG_PATH" && \
+     download "${BASE_URL}/${CHECKSUM_NAME}.pem" "$CERT_PATH"; then
+    log "Verifying cosign signature of ${CHECKSUM_NAME}"
+    cosign verify-blob \
+      --certificate "$CERT_PATH" \
+      --signature "$SIG_PATH" \
+      --certificate-identity-regexp "^https://github\\.com/${REPO}/" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      "$CHECKSUM_PATH" >&2 || die "cosign verification failed for ${CHECKSUM_NAME}"
+  else
+    log "Skipping cosign verification (signature assets not found)"
+  fi
+else
+  log "cosign not installed; skipping signature verification (checksums are still checked)."
+  log "Install cosign (https://docs.sigstore.dev/cosign/installation) for stronger verification."
+fi
+
 EXPECTED_SUM="$(awk -v file="$ARCHIVE_NAME" '$2 == file { print $1 }' "$CHECKSUM_PATH")"
 [ -n "$EXPECTED_SUM" ] || die "no checksum entry found for ${ARCHIVE_NAME}"
 

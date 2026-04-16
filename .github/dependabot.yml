@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Pin actions to their full commit SHA rather than floating tags. Dependabot
+    # opens PRs that bump the SHA whenever a new release is tagged, so reviewers
+    # can audit the diff before adopting it.
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope

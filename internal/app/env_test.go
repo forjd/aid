@@ -60,6 +60,102 @@ func TestDiscoverFailsOutsideRepository(t *testing.T) {
 	}
 }
 
+func TestDiscoverResolvesRelativeAIDDataDir(t *testing.T) {
+	repoDir := initRepo(t)
+
+	workDir := t.TempDir()
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir to work dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+
+	t.Setenv("AID_DATA_DIR", "relative-aid-data")
+
+	env, err := Discover(repoDir)
+	if err != nil {
+		t.Fatalf("discover with relative AID_DATA_DIR: %v", err)
+	}
+
+	if !filepath.IsAbs(env.AppDataDir) {
+		t.Fatalf("expected absolute app data dir, got %q", env.AppDataDir)
+	}
+	if !filepath.IsAbs(env.DBPath) {
+		t.Fatalf("expected absolute db path, got %q", env.DBPath)
+	}
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		t.Fatalf("resolve work dir symlink: %v", err)
+	}
+	resolvedAppDataDir, err := filepath.EvalSymlinks(env.AppDataDir)
+	if err != nil {
+		// EvalSymlinks fails for missing paths. Fall back to comparing raw.
+		resolvedAppDataDir = env.AppDataDir
+	}
+	if !strings.HasPrefix(resolvedAppDataDir, resolvedWorkDir) {
+		t.Fatalf("expected app data dir %q to be inside work dir %q", resolvedAppDataDir, resolvedWorkDir)
+	}
+}
+
+func TestResolveDataDirRejectsEmpty(t *testing.T) {
+	if _, err := resolveDataDir(""); err == nil {
+		t.Fatalf("expected empty path rejection")
+	}
+}
+
+func TestResolveDataDirProducesAbsoluteCleanPath(t *testing.T) {
+	tmp := t.TempDir()
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir tmp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousWD) })
+
+	got, err := resolveDataDir("./sub/../data")
+	if err != nil {
+		t.Fatalf("resolve data dir: %v", err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("expected absolute path, got %q", got)
+	}
+	if filepath.Base(got) != "data" {
+		t.Fatalf("expected clean data dir, got %q", got)
+	}
+}
+
+func TestRawDataDirHonoursOverride(t *testing.T) {
+	t.Setenv("AID_DATA_DIR", "/custom/path")
+	raw, err := rawDataDir()
+	if err != nil {
+		t.Fatalf("raw data dir: %v", err)
+	}
+	if raw != "/custom/path" {
+		t.Fatalf("unexpected raw override: %q", raw)
+	}
+}
+
+func TestRawDataDirReturnsDefaultWhenOverrideMissing(t *testing.T) {
+	t.Setenv("AID_DATA_DIR", "")
+	raw, err := rawDataDir()
+	if err != nil {
+		t.Fatalf("raw data dir: %v", err)
+	}
+	if raw == "" {
+		t.Fatalf("expected default data dir, got empty string")
+	}
+	if !filepath.IsAbs(raw) {
+		t.Fatalf("expected absolute default path, got %q", raw)
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 

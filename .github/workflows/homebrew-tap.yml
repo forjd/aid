@@ -38,11 +38,10 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           test -n "$RELEASE_TAG"
-          archive_url="https://github.com/forjd/aid/archive/refs/tags/${RELEASE_TAG}.tar.gz"
-          curl -fsSL "$archive_url" -o source.tar.gz
-          archive_sha="$(shasum -a 256 source.tar.gz | awk '{print $1}')"
+          checksums_url="https://github.com/forjd/aid/releases/download/${RELEASE_TAG}/checksums.txt"
+          curl -fsSL "$checksums_url" -o checksums.txt
           mkdir -p "tap/$(dirname "$FORMULA_PATH")"
-          sh ./scripts/render_homebrew_formula.sh "$RELEASE_TAG" "$archive_sha" "tap/$FORMULA_PATH"
+          sh ./scripts/render_homebrew_formula.sh "$RELEASE_TAG" --checksums checksums.txt "tap/$FORMULA_PATH"
           mkdir -p "$TAP_REPOSITORY_PATH/$(dirname "$FORMULA_PATH")"
           cp "tap/$FORMULA_PATH" "$TAP_REPOSITORY_PATH/$FORMULA_PATH"
 

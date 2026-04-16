@@ -26,7 +26,8 @@ func Build(branch string, worktree git.WorktreeStatus, bundle resumepkg.Bundle, 
 		fmt.Fprintln(&b, "Active task: ambiguous")
 	}
 
-	openTasks := limitOpenTasks(tasks, 5)
+	scopedTasks := filterScopedTasks(branch, tasks)
+	openTasks := limitOpenTasks(scopedTasks, 5)
 	if len(openTasks) > 0 {
 		fmt.Fprintln(&b, "Open tasks:")
 		for _, task := range openTasks {
@@ -87,6 +88,22 @@ func limitOpenTasks(tasks []store.Task, limit int) []store.Task {
 	}
 
 	return items
+}
+
+// filterScopedTasks drops branch-scoped tasks that belong to another branch.
+// Tasks with empty scope (legacy rows) or repo scope are always kept.
+func filterScopedTasks(branch string, tasks []store.Task) []store.Task {
+	if branch == "" {
+		return tasks
+	}
+	filtered := make([]store.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Scope == store.ScopeBranch && task.Branch != "" && task.Branch != branch {
+			continue
+		}
+		filtered = append(filtered, task)
+	}
+	return filtered
 }
 
 func worktreeLine(status git.WorktreeStatus) string {

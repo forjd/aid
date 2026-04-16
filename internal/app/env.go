@@ -57,6 +57,14 @@ func Discover(cwd string) (Environment, error) {
 }
 
 func dataDir() (string, error) {
+	raw, err := rawDataDir()
+	if err != nil {
+		return "", err
+	}
+	return resolveDataDir(raw)
+}
+
+func rawDataDir() (string, error) {
 	if override := os.Getenv("AID_DATA_DIR"); override != "" {
 		return override, nil
 	}
@@ -80,4 +88,15 @@ func dataDir() (string, error) {
 		}
 		return filepath.Join(home, ".local", "share", "aid"), nil
 	}
+}
+
+func resolveDataDir(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("resolve app data directory: empty path")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve app data directory %q: %w", path, err)
+	}
+	return filepath.Clean(absolute), nil
 }

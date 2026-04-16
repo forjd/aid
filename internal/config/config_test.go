@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +86,37 @@ func TestLoadRepoConfigRejectsInvalidLines(t *testing.T) {
 	_, err := LoadRepoConfig(path)
 	if err == nil {
 		t.Fatalf("expected invalid config error")
+	}
+}
+
+func TestLoadRepoConfigRejectsUnknownKeysAndSections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[output]\ndefault_mode = \"brief\"\nmystery = \"value\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadRepoConfig(path); err == nil || !strings.Contains(err.Error(), `unknown key "output.mystery"`) {
+		t.Fatalf("expected unknown key error, got %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("[mystery]\nfoo = \"bar\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadRepoConfig(path); err == nil || !strings.Contains(err.Error(), `unknown section [mystery]`) {
+		t.Fatalf("expected unknown section error, got %v", err)
+	}
+}
+
+func TestParseStringListHandlesCommasInsideQuotedValues(t *testing.T) {
+	list, err := parseStringList(`["with, comma/", "vendor/"]`)
+	if err != nil {
+		t.Fatalf("parse list with comma in quotes: %v", err)
+	}
+	if !reflect.DeepEqual(list, []string{"with, comma/", "vendor/"}) {
+		t.Fatalf("unexpected parsed list: %#v", list)
+	}
+
+	if _, err := parseStringList(`["no closing quote]`); err == nil {
+		t.Fatalf("expected unterminated quote error")
 	}
 }
 

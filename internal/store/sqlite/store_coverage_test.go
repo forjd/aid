@@ -46,6 +46,127 @@ func TestUpdateTaskStatusRejectsInvalidAndMissingTasks(t *testing.T) {
 	}
 }
 
+func TestAddTaskRejectsInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := openTestStore(t)
+	defer sqliteStore.Close()
+
+	repo, err := sqliteStore.UpsertRepo(ctx, "/tmp/project", "project")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	if _, err := sqliteStore.AddTask(ctx, store.AddTaskInput{
+		RepoID: repo.ID,
+		Branch: "main",
+		Scope:  store.ScopeBranch,
+		Text:   "bogus status",
+		Status: store.TaskStatus("bogus"),
+	}); err == nil {
+		t.Fatalf("expected invalid task status to be rejected at insert")
+	}
+}
+
+func TestMigrateRejectsFutureSchemaVersion(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "aid.db")
+
+	seedStore, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open seed store: %v", err)
+	}
+	if err := seedStore.Migrate(ctx); err != nil {
+		t.Fatalf("migrate seed store: %v", err)
+	}
+	if _, err := seedStore.db.ExecContext(ctx, `PRAGMA user_version = 999`); err != nil {
+		t.Fatalf("bump user_version: %v", err)
+	}
+	if err := seedStore.Close(); err != nil {
+		t.Fatalf("close seed store: %v", err)
+	}
+
+	futureStore, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open future store: %v", err)
+	}
+	defer futureStore.Close()
+
+	err = futureStore.Migrate(ctx)
+	if err == nil || !strings.Contains(err.Error(), "newer than supported") {
+		t.Fatalf("expected future schema to be rejected, got %v", err)
+	}
+}
+
+func TestListFunctionsFilterByBranchScope(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := openTestStore(t)
+	defer sqliteStore.Close()
+
+	repo, err := sqliteStore.UpsertRepo(ctx, "/tmp/project", "project")
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+
+	for _, branch := range []string{"main", "feature"} {
+		if _, err := sqliteStore.AddNote(ctx, store.AddNoteInput{
+			RepoID: repo.ID,
+			Branch: branch,
+			Scope:  store.ScopeBranch,
+			Text:   "note on " + branch,
+		}); err != nil {
+			t.Fatalf("add note on %s: %v", branch, err)
+		}
+		if _, err := sqliteStore.AddTask(ctx, store.AddTaskInput{
+			RepoID: repo.ID,
+			Branch: branch,
+			Scope:  store.ScopeBranch,
+			Text:   "task on " + branch,
+			Status: store.TaskOpen,
+		}); err != nil {
+			t.Fatalf("add task on %s: %v", branch, err)
+		}
+		if _, err := sqliteStore.AddDecision(ctx, store.AddDecisionInput{
+			RepoID: repo.ID,
+			Branch: branch,
+			Text:   "decision on " + branch,
+		}); err != nil {
+			t.Fatalf("add decision on %s: %v", branch, err)
+		}
+		if _, err := sqliteStore.AddHandoff(ctx, store.AddHandoffInput{
+			RepoID:  repo.ID,
+			Branch:  branch,
+			Summary: "handoff on " + branch,
+		}); err != nil {
+			t.Fatalf("add handoff on %s: %v", branch, err)
+		}
+	}
+
+	notes, err := sqliteStore.ListNotes(ctx, repo.ID, "main", 10)
+	if err != nil || len(notes) != 1 || notes[0].Branch != "main" {
+		t.Fatalf("expected only main-branch notes, got %#v err=%v", notes, err)
+	}
+
+	tasks, err := sqliteStore.ListTasks(ctx, repo.ID, "main", 10)
+	if err != nil || len(tasks) != 1 || tasks[0].Branch != "main" {
+		t.Fatalf("expected only main-branch tasks, got %#v err=%v", tasks, err)
+	}
+
+	decisions, err := sqliteStore.ListDecisions(ctx, repo.ID, "main", 10)
+	if err != nil || len(decisions) != 1 || decisions[0].Branch != "main" {
+		t.Fatalf("expected only main-branch decisions, got %#v err=%v", decisions, err)
+	}
+
+	handoffs, err := sqliteStore.ListHandoffs(ctx, repo.ID, "main", 10)
+	if err != nil || len(handoffs) != 1 || handoffs[0].Branch != "main" {
+		t.Fatalf("expected only main-branch handoffs, got %#v err=%v", handoffs, err)
+	}
+
+	allTasks, err := sqliteStore.ListTasks(ctx, repo.ID, "", 10)
+	if err != nil || len(allTasks) != 2 {
+		t.Fatalf("expected all tasks when branch is empty, got %#v err=%v", allTasks, err)
+	}
+}
+
 func TestStatusCountsIncludesEveryTaskState(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := openTestStore(t)

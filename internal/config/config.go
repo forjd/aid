@@ -61,6 +61,18 @@ func EnsureRepoConfig(path string) (bool, error) {
 	return true, nil
 }
 
+var knownConfigSections = map[string]struct{}{
+	"output":   {},
+	"indexing": {},
+	"agent":    {},
+}
+
+var knownConfigKeys = map[string]struct{}{
+	"output.default_mode":   {},
+	"indexing.ignore_paths": {},
+	"agent.skill_path":      {},
+}
+
 func LoadRepoConfig(path string) (RepoConfig, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -81,6 +93,9 @@ func LoadRepoConfig(path string) (RepoConfig, error) {
 
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
+			if _, ok := knownConfigSections[section]; !ok {
+				return RepoConfig{}, fmt.Errorf("parse repo config: unknown section [%s]", section)
+			}
 			continue
 		}
 
@@ -92,7 +107,12 @@ func LoadRepoConfig(path string) (RepoConfig, error) {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 
-		switch section + "." + key {
+		fullKey := section + "." + key
+		if _, ok := knownConfigKeys[fullKey]; !ok {
+			return RepoConfig{}, fmt.Errorf("parse repo config: unknown key %q", fullKey)
+		}
+
+		switch fullKey {
 		case "output.default_mode":
 			parsed, err := parseString(value)
 			if err != nil {
@@ -155,12 +175,15 @@ func parseStringList(value string) ([]string, error) {
 		return nil, fmt.Errorf("expected string list")
 	}
 
-	body := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
-	if body == "" {
+	body := trimmed[1 : len(trimmed)-1]
+	parts, err := splitListElements(body)
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) == 0 {
 		return nil, nil
 	}
 
-	parts := strings.Split(body, ",")
 	items := make([]string, 0, len(parts))
 	for _, part := range parts {
 		parsed, err := parseString(strings.TrimSpace(part))
@@ -171,4 +194,42 @@ func parseStringList(value string) ([]string, error) {
 	}
 
 	return items, nil
+}
+
+// splitListElements splits the comma-separated interior of a TOML array while
+// preserving commas that appear inside quoted string literals.
+func splitListElements(body string) ([]string, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	parts := make([]string, 0)
+	var current strings.Builder
+	inQuote := false
+	escaped := false
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		switch {
+		case escaped:
+			current.WriteByte(c)
+			escaped = false
+		case c == '\\' && inQuote:
+			current.WriteByte(c)
+			escaped = true
+		case c == '"':
+			inQuote = !inQuote
+			current.WriteByte(c)
+		case c == ',' && !inQuote:
+			parts = append(parts, current.String())
+			current.Reset()
+		default:
+			current.WriteByte(c)
+		}
+	}
+	if inQuote {
+		return nil, fmt.Errorf("unterminated quoted string in list")
+	}
+	parts = append(parts, current.String())
+	return parts, nil
 }

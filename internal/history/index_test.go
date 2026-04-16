@@ -68,6 +68,14 @@ func TestServiceIndexFiltersIgnoredPathsAndSkipsFilteredCommits(t *testing.T) {
 	gitClient := &fakeGitClient{
 		reachable: []string{"aaa111", "bbb222", "ccc333"},
 		commits: map[string]git.Commit{
+			"aaa111": {
+				SHA:          "aaa111",
+				Author:       "Dan",
+				CommittedAt:  now.Add(-2 * time.Minute),
+				Message:      "feat: existing commit",
+				Summary:      "feat: existing commit",
+				ChangedPaths: []string{"internal/app/env.go", "vendor/old.txt"},
+			},
 			"bbb222": {
 				SHA:          "bbb222",
 				Author:       "Dan",
@@ -87,16 +95,6 @@ func TestServiceIndexFiltersIgnoredPathsAndSkipsFilteredCommits(t *testing.T) {
 		},
 	}
 	commitStore := &fakeCommitStore{
-		existing: []store.Commit{
-			{
-				SHA:          "aaa111",
-				Author:       "Dan",
-				CommittedAt:  now.Add(-2 * time.Minute),
-				Message:      "feat: existing commit",
-				Summary:      "feat: existing commit",
-				ChangedPaths: []string{"internal/app/env.go", "vendor/old.txt"},
-			},
-		},
 		syncResult: store.SyncCommitsResult{Added: 1, Updated: 1, Removed: 1, Total: 2, Initial: false},
 	}
 
@@ -106,7 +104,7 @@ func TestServiceIndexFiltersIgnoredPathsAndSkipsFilteredCommits(t *testing.T) {
 		t.Fatalf("index history with ignored paths: %v", err)
 	}
 
-	if !reflect.DeepEqual(gitClient.requested, []string{"bbb222", "ccc333"}) {
+	if !reflect.DeepEqual(gitClient.requested, []string{"aaa111", "bbb222", "ccc333"}) {
 		t.Fatalf("unexpected requested shas: %#v", gitClient.requested)
 	}
 	if result.Indexed != 2 || result.Added != 1 || result.Updated != 1 || result.Removed != 1 || result.Initial {
@@ -120,6 +118,34 @@ func TestServiceIndexFiltersIgnoredPathsAndSkipsFilteredCommits(t *testing.T) {
 	}
 	if commitStore.syncInput.Commits[1].SHA != "ccc333" || !reflect.DeepEqual(commitStore.syncInput.Commits[1].ChangedPaths, []string{"internal/app/env.go"}) {
 		t.Fatalf("unexpected filtered new commit: %#v", commitStore.syncInput.Commits[1])
+	}
+}
+
+func TestServiceIndexRestoresPreviouslyFilteredPaths(t *testing.T) {
+	now := time.Date(2026, time.April, 15, 12, 0, 0, 0, time.UTC)
+	gitClient := &fakeGitClient{
+		reachable: []string{"aaa111"},
+		commits: map[string]git.Commit{
+			"aaa111": {
+				SHA:          "aaa111",
+				Author:       "Dan",
+				CommittedAt:  now,
+				Message:      "chore: vendor refresh",
+				Summary:      "chore: vendor refresh",
+				ChangedPaths: []string{"vendor/deps.txt"},
+			},
+		},
+	}
+	commitStore := &fakeCommitStore{
+		syncResult: store.SyncCommitsResult{Added: 0, Updated: 1, Total: 1, Initial: false},
+	}
+
+	service := Service{Git: gitClient, Store: commitStore, Now: func() time.Time { return now }}
+	if _, err := service.Index(context.Background(), "/tmp/repo", 42, nil); err != nil {
+		t.Fatalf("index without ignore_paths: %v", err)
+	}
+	if len(commitStore.syncInput.Commits) != 1 || !reflect.DeepEqual(commitStore.syncInput.Commits[0].ChangedPaths, []string{"vendor/deps.txt"}) {
+		t.Fatalf("expected vendor path to reappear when ignore_paths is relaxed, got %#v", commitStore.syncInput.Commits)
 	}
 }
 
@@ -152,13 +178,8 @@ func (f *fakeGitClient) CommitsBySHA(_ string, shas []string) ([]git.Commit, err
 }
 
 type fakeCommitStore struct {
-	existing   []store.Commit
 	syncInput  store.SyncCommitsInput
 	syncResult store.SyncCommitsResult
-}
-
-func (f *fakeCommitStore) ListCommits(context.Context, int64, int) ([]store.Commit, error) {
-	return append([]store.Commit(nil), f.existing...), nil
 }
 
 func (f *fakeCommitStore) SyncCommits(_ context.Context, input store.SyncCommitsInput) (store.SyncCommitsResult, error) {

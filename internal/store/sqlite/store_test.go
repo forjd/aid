@@ -54,7 +54,7 @@ func TestStoreCRUDFlow(t *testing.T) {
 		t.Fatalf("expected note id to be set")
 	}
 
-	notes, err := sqliteStore.ListNotes(ctx, repo.ID, 10)
+	notes, err := sqliteStore.ListNotes(ctx, repo.ID, "main", 10)
 	if err != nil {
 		t.Fatalf("list notes: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestStoreCRUDFlow(t *testing.T) {
 		t.Fatalf("add task: %v", err)
 	}
 
-	tasks, err := sqliteStore.ListTasks(ctx, repo.ID, 10)
+	tasks, err := sqliteStore.ListTasks(ctx, repo.ID, "main", 10)
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestStoreCRUDFlow(t *testing.T) {
 		t.Fatalf("add decision: %v", err)
 	}
 
-	decisions, err := sqliteStore.ListDecisions(ctx, repo.ID, 10)
+	decisions, err := sqliteStore.ListDecisions(ctx, repo.ID, "main", 10)
 	if err != nil {
 		t.Fatalf("list decisions: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestStoreCRUDFlow(t *testing.T) {
 		t.Fatalf("add handoff: %v", err)
 	}
 
-	handoffs, err := sqliteStore.ListHandoffs(ctx, repo.ID, 10)
+	handoffs, err := sqliteStore.ListHandoffs(ctx, repo.ID, "main", 10)
 	if err != nil {
 		t.Fatalf("list handoffs: %v", err)
 	}
@@ -354,8 +354,13 @@ func TestContextSearchUsesFTSRankingAndRepairsMissingIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search notes: %v", err)
 	}
-	if len(notes) < 2 || notes[0].Text != "Refresh retry fails after 401 retry" {
+	if len(notes) == 0 || notes[0].Text != "Refresh retry fails after 401 retry" {
 		t.Fatalf("expected note search to rank the main-branch exact match first, got %#v", notes)
+	}
+	for _, note := range notes {
+		if note.Branch == "feature" {
+			t.Fatalf("expected feature-branch note to be filtered out when searching from main, got %#v", notes)
+		}
 	}
 
 	decisions, err := sqliteStore.SearchDecisions(ctx, repo.ID, "main", "401 retry", 10)

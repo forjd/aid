@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +45,7 @@ func TestRootBranchAndStatus(t *testing.T) {
 		t.Fatalf("expected named branch, got %q", branch)
 	}
 
-	status, err := Status(repoDir)
+	status, err := Status(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("status on clean repo: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestRootBranchAndStatus(t *testing.T) {
 	writeTrackedFile(t, repoDir, "README.md", "updated\n")
 	writeTrackedFile(t, repoDir, "notes.txt", "untracked\n")
 
-	status, err = Status(repoDir)
+	status, err = Status(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("status on dirty repo: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestCommitsAndCommitQueries(t *testing.T) {
 	runGitWithIdentity(t, repoDir, "commit", "-m", "fix: add two")
 	shaTwo := gitOutput(t, repoDir, "rev-parse", "HEAD")
 
-	commits, err := Commits(repoDir, 2)
+	commits, err := Commits(context.Background(), repoDir, 2)
 	if err != nil {
 		t.Fatalf("list commits: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestCommitsAndCommitQueries(t *testing.T) {
 		t.Fatalf("unexpected newest changed paths: %#v", commits[0].ChangedPaths)
 	}
 
-	recent, err := RecentCommits(repoDir, 1)
+	recent, err := RecentCommits(context.Background(), repoDir, 1)
 	if err != nil {
 		t.Fatalf("recent commits: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestCommitsAndCommitQueries(t *testing.T) {
 		t.Fatalf("unexpected recent commits: %#v", recent)
 	}
 
-	shas, err := AllCommitSHAs(repoDir)
+	shas, err := AllCommitSHAs(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("all commit shas: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestCommitsAndCommitQueries(t *testing.T) {
 		t.Fatalf("unexpected shas: %#v", shas)
 	}
 
-	bySHA, err := CommitsBySHA(repoDir, []string{shaOne, shaTwo})
+	bySHA, err := CommitsBySHA(context.Background(), repoDir, []string{shaOne, shaTwo})
 	if err != nil {
 		t.Fatalf("commits by sha: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestCommitsAndCommitQueries(t *testing.T) {
 func TestNoCommitRepositoriesReturnEmptyResults(t *testing.T) {
 	repoDir := initGitRepo(t)
 
-	commits, err := Commits(repoDir, 10)
+	commits, err := Commits(context.Background(), repoDir, 10)
 	if err != nil {
 		t.Fatalf("list commits in empty repo: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestNoCommitRepositoriesReturnEmptyResults(t *testing.T) {
 		t.Fatalf("expected nil commits for empty repo, got %#v", commits)
 	}
 
-	shas, err := AllCommitSHAs(repoDir)
+	shas, err := AllCommitSHAs(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("list shas in empty repo: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestNoCommitRepositoriesReturnEmptyResults(t *testing.T) {
 		t.Fatalf("expected nil shas for empty repo, got %#v", shas)
 	}
 
-	bySHA, err := CommitsBySHA(repoDir, nil)
+	bySHA, err := CommitsBySHA(context.Background(), repoDir, nil)
 	if err != nil {
 		t.Fatalf("commits by empty sha list: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestParseCommitsRejectsInvalidInput(t *testing.T) {
 	if _, err := parseCommits([]byte("\x00bad"), 1); err == nil {
 		t.Fatalf("expected malformed header error")
 	}
-	if _, err := parseCommits([]byte("\x00abc\x00Dan\x00not-a-time\x00summary"), 1); err == nil {
+	if _, err := parseCommits([]byte("\x00abc\x00Dan\x00not-a-time\x00summary\x00body"), 1); err == nil {
 		t.Fatalf("expected invalid time error")
 	}
 }
@@ -188,6 +189,7 @@ func TestParseCommitsHandlesNULTokensAndPathsWithSpaces(t *testing.T) {
 		[]byte("Dan"),
 		[]byte("2026-04-15T12:00:00Z"),
 		[]byte("fix: retry path"),
+		[]byte("body paragraph"),
 		[]byte("\ninternal/app/env.go"),
 		[]byte("\ntwo words.txt"),
 	}, []byte{0})
@@ -202,10 +204,42 @@ func TestParseCommitsHandlesNULTokensAndPathsWithSpaces(t *testing.T) {
 	if len(commits[0].ChangedPaths) != 2 || commits[0].ChangedPaths[1] != "two words.txt" {
 		t.Fatalf("unexpected changed paths: %#v", commits[0].ChangedPaths)
 	}
+	if commits[0].Message != "fix: retry path\n\nbody paragraph" {
+		t.Fatalf("unexpected combined message: %q", commits[0].Message)
+	}
+	if commits[0].Summary != "fix: retry path" {
+		t.Fatalf("unexpected summary: %q", commits[0].Summary)
+	}
+}
+
+func TestCommitsCaptureBody(t *testing.T) {
+	repoDir := initGitRepo(t)
+	writeTrackedFile(t, repoDir, "auth.txt", "refresh\n")
+	runGit(t, repoDir, "add", "auth.txt")
+
+	message := "feat: token refresh\n\nAdds session fingerprint so refresh retry can detect replay."
+	cmd := exec.Command("git", "-C", repoDir, "-c", "user.name=Test User", "-c", "user.email=test@example.com", "commit", "-m", message)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit with body: %v\n%s", err, out)
+	}
+
+	commits, err := Commits(context.Background(), repoDir, 1)
+	if err != nil {
+		t.Fatalf("list commits: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("expected one commit, got %#v", commits)
+	}
+	if commits[0].Summary != "feat: token refresh" {
+		t.Fatalf("unexpected summary: %q", commits[0].Summary)
+	}
+	if !strings.Contains(commits[0].Message, "session fingerprint") {
+		t.Fatalf("expected message to include body, got %q", commits[0].Message)
+	}
 }
 
 func TestRunGitOutputReturnsExitMessage(t *testing.T) {
-	_, err := runGitOutput("-C", t.TempDir(), "not-a-real-git-command")
+	_, err := runGitOutput(context.Background(),"-C", t.TempDir(), "not-a-real-git-command")
 	if err == nil || !strings.Contains(err.Error(), "not-a-real-git-command") {
 		t.Fatalf("expected git error message, got %v", err)
 	}

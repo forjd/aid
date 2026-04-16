@@ -55,8 +55,8 @@ func TestRunWritesJSONErrorPayload(t *testing.T) {
 	var stderr bytes.Buffer
 
 	exitCode := Run([]string{"note", "missing", "--json"}, &stdout, &stderr)
-	if exitCode != 1 {
-		t.Fatalf("expected non-zero exit code, got %d", exitCode)
+	if exitCode != exitUsage {
+		t.Fatalf("expected usage exit code %d, got %d", exitUsage, exitCode)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected empty stderr for json errors, got %q", stderr.String())
@@ -67,6 +67,7 @@ func TestRunWritesJSONErrorPayload(t *testing.T) {
 		Command string `json:"command"`
 		Error   struct {
 			Message string `json:"message"`
+			Code    string `json:"code"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
@@ -75,6 +76,9 @@ func TestRunWritesJSONErrorPayload(t *testing.T) {
 	if payload.OK || payload.Command != "note" || !strings.Contains(payload.Error.Message, `unknown command "missing"`) {
 		t.Fatalf("unexpected json error payload: %#v", payload)
 	}
+	if payload.Error.Code != string(ErrCodeUsage) {
+		t.Fatalf("expected usage error code, got %q", payload.Error.Code)
+	}
 }
 
 func TestRunWritesHumanErrorToStderr(t *testing.T) {
@@ -82,8 +86,8 @@ func TestRunWritesHumanErrorToStderr(t *testing.T) {
 	var stderr bytes.Buffer
 
 	exitCode := Run([]string{"--brief", "--verbose"}, &stdout, &stderr)
-	if exitCode != 1 {
-		t.Fatalf("expected non-zero exit code, got %d", exitCode)
+	if exitCode != exitUsage {
+		t.Fatalf("expected usage exit code %d, got %d", exitUsage, exitCode)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("expected empty stdout for human error, got %q", stdout.String())

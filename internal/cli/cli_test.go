@@ -249,6 +249,88 @@ func TestInitAndCrudFlow(t *testing.T) {
 	}
 }
 
+func TestStatusDoesNotCreateDBBeforeInit(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to temp repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "status", "--brief")
+	if _, err := os.Stat(filepath.Join(dataDir, "aid.db")); err == nil {
+		t.Fatalf("expected no database before init, but aid.db exists")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
+func TestDashDashPreservesFlagLikeTokens(t *testing.T) {
+	repoDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "aid-data")
+
+	runGit(t, repoDir, "init", "-q")
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir to temp repo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+	t.Setenv("AID_DATA_DIR", dataDir)
+
+	_ = runCLI(t, "init")
+	_ = runCLI(t, "note", "add", "--", "keep", "--json", "literal")
+
+	noteList := runCLI(t, "note", "list", "--brief")
+	if !strings.Contains(noteList, "keep --json literal") {
+		t.Fatalf("expected note to contain literal --json token, got %q", noteList)
+	}
+}
+
+func TestHelpJSONOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	if exit := Run([]string{"--json", "--help"}, &stdout, &stderr); exit != 0 {
+		t.Fatalf("expected success exit code, got %d stderr=%q", exit, stderr.String())
+	}
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Data    struct {
+			Path        string `json:"path"`
+			Usage       string `json:"usage"`
+			Subcommands []struct {
+				Name string `json:"name"`
+			} `json:"subcommands"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal help json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Command != "aid" || payload.Data.Path != "aid" {
+		t.Fatalf("unexpected help payload: %#v", payload)
+	}
+	if len(payload.Data.Subcommands) == 0 {
+		t.Fatalf("expected subcommands in help payload: %#v", payload)
+	}
+}
+
 func TestStatusSupportsBriefAndJSON(t *testing.T) {
 	repoDir := t.TempDir()
 	dataDir := filepath.Join(t.TempDir(), "aid-data")

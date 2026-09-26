@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -15,7 +16,10 @@ func Root(startDir string) (string, error) {
 		return "", fmt.Errorf("resolve git repository root: %w", err)
 	}
 
-	return output, nil
+	// `rev-parse --show-toplevel` always prints POSIX separators, even on
+	// Windows. Callers treat the root as a filesystem path and as the repo's
+	// primary key in the store, so hand back the native form.
+	return filepath.Clean(filepath.FromSlash(output)), nil
 }
 
 func Branch(startDir string) (string, error) {

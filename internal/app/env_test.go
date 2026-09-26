@@ -88,17 +88,18 @@ func TestDiscoverResolvesRelativeAIDDataDir(t *testing.T) {
 	if !filepath.IsAbs(env.DBPath) {
 		t.Fatalf("expected absolute db path, got %q", env.DBPath)
 	}
-	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	// A relative override resolves against the process working directory, so
+	// compare against that rather than against workDir. The two can differ
+	// textually while naming the same directory — on Windows t.TempDir hands
+	// back an 8.3 short path and os.Getwd expands it — and EvalSymlinks cannot
+	// bridge the gap because relative-aid-data does not exist yet.
+	cwd, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("resolve work dir symlink: %v", err)
+		t.Fatalf("get work dir: %v", err)
 	}
-	resolvedAppDataDir, err := filepath.EvalSymlinks(env.AppDataDir)
-	if err != nil {
-		// EvalSymlinks fails for missing paths. Fall back to comparing raw.
-		resolvedAppDataDir = env.AppDataDir
-	}
-	if !strings.HasPrefix(resolvedAppDataDir, resolvedWorkDir) {
-		t.Fatalf("expected app data dir %q to be inside work dir %q", resolvedAppDataDir, resolvedWorkDir)
+	wantAppDataDir := filepath.Join(cwd, "relative-aid-data")
+	if env.AppDataDir != wantAppDataDir {
+		t.Fatalf("unexpected app data dir: got %q, want %q", env.AppDataDir, wantAppDataDir)
 	}
 }
 

@@ -76,6 +76,22 @@ func TestRootBranchAndStatus(t *testing.T) {
 	}
 }
 
+func TestRootUsesNativePathSeparators(t *testing.T) {
+	repoDir := initGitRepo(t)
+
+	root, err := Root(repoDir)
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+
+	// git prints POSIX separators on every platform, so on Windows the raw
+	// output is not a native path. filepath.Clean is a no-op once the
+	// separators are right, and rewrites them when they are not.
+	if root != filepath.Clean(root) {
+		t.Fatalf("expected native cleaned path, got %q", root)
+	}
+}
+
 func TestRootErrorsOutsideRepository(t *testing.T) {
 	_, err := Root(t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "resolve git repository root") {

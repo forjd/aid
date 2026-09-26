@@ -61,6 +61,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install syft (SBOM generator)
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Validate GoReleaser config
         uses: goreleaser/goreleaser-action@v7
         with:
